@@ -16,6 +16,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
   let browser;
   
   try {
+    console.log('🌐 Launching browser...');
     browser = await puppeteer.launch({
       headless: 'new',
       args: [
@@ -28,50 +29,121 @@ export async function scrapeActionNetwork(sport = 'nba') {
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     });
+    console.log('✅ Browser launched');
 
     const page = await browser.newPage();
+    
+    // Enable request/response logging
+    page.on('request', request => {
+      console.log(`📤 Request: ${request.method()} ${request.url().substring(0, 100)}`);
+    });
+    
+    page.on('response', response => {
+      console.log(`📥 Response: ${response.status()} ${response.url().substring(0, 100)}`);
+    });
+    
+    page.on('console', msg => {
+      console.log(`🖥️  Page Console: ${msg.text()}`);
+    });
+    
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+    console.log('✅ Page configured');
 
-    console.log('🔐 Logging in to Action Network...');
+    console.log('🔐 Navigating to login page...');
+    console.log('⏱️  Timeout set to 5 minutes (300 seconds)');
     
-    await page.goto('https://www.actionnetwork.com/login', {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
+    // Try to navigate with 5 minute timeout
+    const startTime = Date.now();
+    try {
+      await page.goto('https://www.actionnetwork.com/login', {
+        waitUntil: 'domcontentloaded',
+        timeout: 300000, // 5 minutes
+      });
+      const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      console.log(`✅ Login page loaded in ${loadTime} seconds`);
+    } catch (navError) {
+      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      console.error(`❌ Navigation failed after ${elapsedTime} seconds`);
+      
+      // Try to get current page content for debugging
+      const currentUrl = page.url();
+      const pageTitle = await page.title().catch(() => 'Unable to get title');
+      console.log(`📍 Current URL: ${currentUrl}`);
+      console.log(`📄 Page Title: ${pageTitle}`);
+      
+      // Take a screenshot if possible
+      try {
+        await page.screenshot({ path: '/tmp/login-timeout.png' });
+        console.log('📸 Screenshot saved to /tmp/login-timeout.png');
+      } catch (e) {
+        console.log('⚠️  Could not take screenshot');
+      }
+      
+      throw navError;
+    }
 
+    // Check if we actually got to login page
+    const currentUrl = page.url();
+    const pageTitle = await page.title();
+    console.log(`📍 Current URL: ${currentUrl}`);
+    console.log(`📄 Page Title: ${pageTitle}`);
+
+    // Wait for login form with increased timeout
+    console.log('🔍 Looking for email input field...');
     await page.waitForSelector('input[type="email"], input[name="email"]', { 
-      timeout: 20000
+      timeout: 30000
     });
+    console.log('✅ Found email input field');
     
+    // Add small delay
+    console.log('⏱️  Waiting 2 seconds...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     
+    // Fill login form
+    console.log('⌨️  Typing email...');
     await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 100 });
+    console.log('✅ Email entered');
+    
+    console.log('⌨️  Typing password...');
     await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 100 });
+    console.log('✅ Password entered');
 
+    // Wait before clicking
+    console.log('⏱️  Waiting 1 second before clicking login...');
     await new Promise(resolve => setTimeout(resolve, 1000));
 
+    // Click login button
+    console.log('🖱️  Clicking login button...');
     await Promise.all([
       page.waitForNavigation({ 
         waitUntil: 'domcontentloaded',
-        timeout: 60000
+        timeout: 120000 // 2 minutes
       }),
       page.click('button[type="submit"]'),
     ]);
 
     console.log('✅ Logged in successfully');
     
+    // Check where we ended up
+    const afterLoginUrl = page.url();
+    console.log(`📍 After login URL: ${afterLoginUrl}`);
+    
+    // Wait after login
+    console.log('⏱️  Waiting 3 seconds after login...');
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    console.log('📊 Loading public betting data...');
-    
+    console.log('📊 Navigating to public betting page...');
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: 60000,
+      timeout: 120000, // 2 minutes
     });
+    console.log('✅ Public betting page loaded');
 
+    // Wait for data
+    console.log('⏱️  Waiting 5 seconds for data to load...');
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     console.log('📥 Extracting betting data...');
@@ -87,12 +159,15 @@ export async function scrapeActionNetwork(sport = 'nba') {
       let gameRows = [];
       for (const selector of selectors) {
         gameRows = document.querySelectorAll(selector);
-        if (gameRows.length > 0) break;
+        if (gameRows.length > 0) {
+          console.log(`Found ${gameRows.length} rows with selector: ${selector}`);
+          break;
+        }
       }
 
-      console.log(`Found ${gameRows.length} potential game rows`);
+      console.log(`Total game rows found: ${gameRows.length}`);
 
-      gameRows.forEach((row) => {
+      gameRows.forEach((row, index) => {
         try {
           const teamElements = row.querySelectorAll('[class*="team"], .team-name, td');
           if (teamElements.length < 2) return;
@@ -169,9 +244,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
             if (diffMatches.length > 1) game.total_diff = parseInt(diffMatches[1]);
           }
 
+          console.log(`Parsed game ${index + 1}: ${awayTeam} @ ${homeTeam}`);
           results.push(game);
         } catch (err) {
-          console.error(`Error parsing row:`, err.message);
+          console.error(`Error parsing row ${index}:`, err.message);
         }
       });
 
@@ -181,15 +257,26 @@ export async function scrapeActionNetwork(sport = 'nba') {
     console.log(`✅ Extracted ${games.length} games`);
     
     if (games.length > 0) {
-      console.log('Sample game:', JSON.stringify(games[0], null, 2));
+      console.log('📄 Sample game:', JSON.stringify(games[0], null, 2));
+    } else {
+      console.log('⚠️  No games extracted - page might not have loaded correctly');
+      
+      // Get page HTML for debugging
+      const bodyHTML = await page.evaluate(() => document.body.innerHTML);
+      console.log('📄 Page HTML snippet:', bodyHTML.substring(0, 500));
     }
 
     await browser.close();
+    console.log('✅ Browser closed');
     return games;
 
   } catch (error) {
     console.error('❌ Scraping failed:', error.message);
-    if (browser) await browser.close();
+    console.error('Stack trace:', error.stack);
+    if (browser) {
+      await browser.close();
+      console.log('✅ Browser closed after error');
+    }
     throw error;
   }
 }
