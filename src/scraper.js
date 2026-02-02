@@ -270,6 +270,95 @@ export async function scrapeActionNetwork(sport = 'nba') {
     await new Promise(resolve => setTimeout(resolve, 5000));
     console.log('✅ Page ready for data extraction');
 
+    // ==================== PAGE STATE DEBUG ====================
+    console.log('🔍 Debugging page state...');
+
+    const pageState = await page.evaluate(() => {
+      const state = {
+        url: window.location.href,
+        title: document.title,
+        bodyTextSnippet: document.body?.textContent?.substring(0, 500) || 'no body',
+        hasTable: !!document.querySelector('table'),
+        hasTbody: !!document.querySelector('tbody'),
+        tbodyRowCount: document.querySelectorAll('tbody tr').length,
+        allTrCount: document.querySelectorAll('tr').length,
+        hasPublicBetting: document.body?.textContent?.includes('Public Betting') || false,
+        hasSignIn: document.body?.textContent?.includes('Sign In') || false,
+        hasUpgrade: document.body?.textContent?.includes('upgrade') || document.body?.textContent?.includes('PRO') || false,
+        visibleDropdownText: '',
+        possibleGameContainers: 0,
+      };
+
+      // Look for the dropdown value
+      const dropdownCandidates = document.querySelectorAll('*');
+      for (const el of dropdownCandidates) {
+        const text = el.textContent?.trim();
+        const rect = el.getBoundingClientRect();
+        if ((text === 'Spread' || text === 'All Markets' || text === 'Total' || text === 'Moneyline') &&
+          rect.top > 50 && rect.top < 200 && rect.width > 50 && rect.width < 300) {
+          state.visibleDropdownText = text;
+          break;
+        }
+      }
+
+      // Look for game-related containers with various selectors
+      const gameSelectors = [
+        '.public-betting__game-info',
+        '[class*="game-info"]',
+        '[class*="GameInfo"]',
+        '[class*="matchup"]',
+        '[class*="event"]',
+        'tr',
+        '[data-testid*="game"]',
+        '[data-testid*="row"]',
+      ];
+
+      for (const sel of gameSelectors) {
+        const count = document.querySelectorAll(sel).length;
+        if (count > 0) {
+          state.possibleGameContainers = Math.max(state.possibleGameContainers, count);
+        }
+      }
+
+      return state;
+    });
+
+    console.log('📊 PAGE STATE:');
+    console.log('  URL:', pageState.url);
+    console.log('  Title:', pageState.title);
+    console.log('  Has table:', pageState.hasTable);
+    console.log('  Has tbody:', pageState.hasTbody);
+    console.log('  Tbody row count:', pageState.tbodyRowCount);
+    console.log('  All tr count:', pageState.allTrCount);
+    console.log('  Has "Public Betting":', pageState.hasPublicBetting);
+    console.log('  Has "Sign In" button:', pageState.hasSignIn);
+    console.log('  Has upgrade/PRO:', pageState.hasUpgrade);
+    console.log('  Visible dropdown text:', pageState.visibleDropdownText);
+    console.log('  Possible game containers:', pageState.possibleGameContainers);
+    console.log('  Body snippet:', pageState.bodyTextSnippet.substring(0, 200));
+
+    // If no rows found, wait longer and retry
+    if (pageState.tbodyRowCount === 0) {
+      console.log('⚠️  No tbody rows found - waiting 5 more seconds...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      const retryRowCount = await page.evaluate(() => document.querySelectorAll('tbody tr').length);
+      console.log('  Retry tbody row count:', retryRowCount);
+
+      if (retryRowCount === 0) {
+        // Try navigating directly to public-betting page without query param
+        console.log('⚠️  Still no rows - trying direct navigation to public-betting page...');
+        await page.goto(`https://www.actionnetwork.com/${sport.toLowerCase()}/public-betting`, {
+          waitUntil: 'networkidle2',
+          timeout: 60000,
+        });
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        const finalRowCount = await page.evaluate(() => document.querySelectorAll('tbody tr').length);
+        console.log('  Final tbody row count after direct nav:', finalRowCount);
+      }
+    }
+
     // ==================== HTML STRUCTURE DEBUG ====================
     console.log('🔍 Starting HTML structure debug...');
 
