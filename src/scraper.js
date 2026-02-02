@@ -39,7 +39,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
     );
     console.log('✅ Page configured');
 
-    // Go to homepage (not /login!)
+    // Go to homepage
     console.log('🔐 Navigating to Action Network homepage...');
     await page.goto('https://www.actionnetwork.com/', {
       waitUntil: 'domcontentloaded',
@@ -47,135 +47,45 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Homepage loaded');
 
-    // Wait for page to settle
     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // Click "Sign In" button in top right corner
+    // Click Sign In button
     console.log('🖱️  Looking for Sign In button...');
-    const signInSelectors = [
-      'a[href*="login"]',
-      'button:has-text("Sign In")',
-      'a:has-text("Sign In")',
-      '[data-testid="sign-in"]',
-      '.sign-in-button',
-    ];
-
-    let signInClicked = false;
-    for (const selector of signInSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 5000 });
-        console.log(`✅ Found Sign In button with selector: ${selector}`);
-        await page.click(selector);
-        console.log('✅ Clicked Sign In button');
-        signInClicked = true;
-        break;
-      } catch (e) {
-        console.log(`⚠️  Selector ${selector} not found, trying next...`);
+    await page.evaluate(() => {
+      const elements = Array.from(document.querySelectorAll('a, button'));
+      const signInElement = elements.find(el => 
+        el.textContent?.trim().toLowerCase().includes('sign in')
+      );
+      if (signInElement) {
+        signInElement.click();
       }
-    }
+    });
+    console.log('✅ Clicked Sign In button');
 
-    if (!signInClicked) {
-      // Try clicking any element with "Sign In" text
-      console.log('🔍 Trying to find Sign In by text content...');
-      await page.evaluate(() => {
-        const elements = Array.from(document.querySelectorAll('a, button'));
-        const signInElement = elements.find(el => 
-          el.textContent?.trim().toLowerCase().includes('sign in')
-        );
-        if (signInElement) {
-          signInElement.click();
-        }
-      });
-      console.log('✅ Clicked Sign In button via text search');
-    }
-
-    // Wait for login modal to appear
-    console.log('⏱️  Waiting for login modal to appear...');
+    // Wait for login modal
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Wait for email input in the modal
-    console.log('🔍 Looking for email input field in modal...');
-    const emailSelectors = [
-      'input[type="email"]',
-      'input[name="email"]',
-      'input[placeholder*="mail"]',
-      'input[placeholder*="Email"]',
-    ];
-
-    let emailInput = null;
-    for (const selector of emailSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 5000 });
-        console.log(`✅ Found email input with selector: ${selector}`);
-        emailInput = selector;
-        break;
-      } catch (e) {
-        console.log(`⚠️  Email selector ${selector} not found, trying next...`);
-      }
-    }
-
-    if (!emailInput) {
-      throw new Error('Could not find email input field in login modal');
-    }
-
-    // Fill in email
-    console.log('⌨️  Typing email...');
-    await page.type(emailInput, EMAIL, { delay: 100 });
+    // Fill in login form
+    console.log('🔍 Looking for email input field...');
+    await page.waitForSelector('input[name="email"]', { timeout: 10000 });
+    console.log('✅ Found email input');
+    
+    await page.type('input[name="email"]', EMAIL, { delay: 100 });
     console.log('✅ Email entered');
-
-    // Fill in password
-    console.log('⌨️  Typing password...');
+    
     await page.type('input[type="password"]', PASSWORD, { delay: 100 });
     console.log('✅ Password entered');
 
-    // Wait before clicking
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Click the Sign In button in the modal
-    console.log('🖱️  Clicking Sign In button in modal...');
-    const loginButtonSelectors = [
-      'button[type="submit"]',
-      'button:has-text("Sign In")',
-      'button:has-text("Sign in")',
-      'button:has-text("Log In")',
-      '.login-button',
-    ];
+    // Click login button
+    console.log('🖱️  Clicking Sign In button...');
+    await page.click('button[type="submit"]');
+    console.log('✅ Login button clicked');
 
-    let loginClicked = false;
-    for (const selector of loginButtonSelectors) {
-      try {
-        await page.click(selector);
-        console.log(`✅ Clicked login button with selector: ${selector}`);
-        loginClicked = true;
-        break;
-      } catch (e) {
-        console.log(`⚠️  Login button selector ${selector} not found, trying next...`);
-      }
-    }
-
-    if (!loginClicked) {
-      // Try clicking by text
-      await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const loginButton = buttons.find(btn => 
-          btn.textContent?.trim().toLowerCase().includes('sign in')
-        );
-        if (loginButton) {
-          loginButton.click();
-        }
-      });
-      console.log('✅ Clicked login button via text search');
-    }
-
-    // Wait for "Success! One moment..." message or modal to close
-    console.log('⏱️  Waiting for login to complete...');
+    // Wait for login to complete
     await new Promise(resolve => setTimeout(resolve, 5000));
-
-    // Check if we're logged in by looking for user menu or checking if modal closed
-    console.log('✅ Login process completed');
-
-    const currentUrl = page.url();
-    console.log(`📍 Current URL: ${currentUrl}`);
+    console.log('✅ Login completed');
 
     // Navigate to public betting page
     console.log('📊 Navigating to public betting page...');
@@ -185,113 +95,210 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Public betting page loaded');
 
-    // Wait for data to load
-    console.log('⏱️  Waiting 5 seconds for data to load...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for page to load
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
+    // Click the "Spread" dropdown to change to "All Markets"
+    console.log('🖱️  Looking for market filter dropdown...');
+    
+    const dropdownSelectors = [
+      'button:has-text("Spread")',
+      '[data-testid*="market-filter"]',
+      'button[aria-label*="market"]',
+      'select',
+      'button:has-text("Total")',
+      'button:has-text("Moneyline")',
+    ];
+
+    // Try to click the dropdown
+    let dropdownClicked = false;
+    for (const selector of dropdownSelectors) {
+      try {
+        await page.click(selector);
+        console.log(`✅ Clicked dropdown with selector: ${selector}`);
+        dropdownClicked = true;
+        break;
+      } catch (e) {
+        // Try next selector
+      }
+    }
+
+    if (!dropdownClicked) {
+      // Try clicking by text
+      console.log('🔍 Trying to find dropdown by text...');
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const dropdownButton = buttons.find(btn => 
+          btn.textContent?.trim().toLowerCase().includes('spread') ||
+          btn.textContent?.trim().toLowerCase().includes('total') ||
+          btn.textContent?.trim().toLowerCase().includes('moneyline')
+        );
+        if (dropdownButton) {
+          dropdownButton.click();
+        }
+      });
+      console.log('✅ Clicked dropdown via text search');
+    }
+
+    // Wait for dropdown menu to appear
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Click "All Markets" option
+    console.log('🖱️  Selecting "All Markets" option...');
+    await page.evaluate(() => {
+      const allElements = Array.from(document.querySelectorAll('button, div, span, li'));
+      const allMarketsOption = allElements.find(el => 
+        el.textContent?.trim().toLowerCase() === 'all markets'
+      );
+      if (allMarketsOption) {
+        allMarketsOption.click();
+      }
+    });
+    console.log('✅ Selected "All Markets"');
+
+    // Wait for page to update with all markets
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('✅ Page updated with all markets');
+
+    // Extract data
     console.log('📥 Extracting betting data...');
     const games = await page.evaluate((sportName) => {
       const results = [];
-      const selectors = [
-        'tr[data-testid*="game"]',
-        'tr[class*="game"]',
-        '.game-row',
-        'tbody tr'
-      ];
+      const gameMap = new Map(); // Track games by matchup
       
-      let gameRows = [];
-      for (const selector of selectors) {
-        gameRows = document.querySelectorAll(selector);
-        if (gameRows.length > 0) {
-          console.log(`Found ${gameRows.length} rows with selector: ${selector}`);
-          break;
-        }
-      }
+      // Find all table rows
+      const rows = document.querySelectorAll('tbody tr');
+      console.log(`Found ${rows.length} total rows`);
 
-      console.log(`Total game rows found: ${gameRows.length}`);
-
-      gameRows.forEach((row, index) => {
+      rows.forEach((row, index) => {
         try {
-          const teamElements = row.querySelectorAll('[class*="team"], .team-name, td');
-          if (teamElements.length < 2) return;
-
-          const teams = Array.from(teamElements)
-            .map(el => el.textContent?.trim())
-            .filter(text => text && text.length > 2 && text.length < 30);
-
-          if (teams.length < 2) return;
-
-          const awayTeam = teams[0];
-          const homeTeam = teams[1];
-
-          const game = {
-            game_id: `${awayTeam.replace(/\s+/g, '_')}_${homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
-            sport: sportName.toUpperCase(),
-            scheduled_time: new Date().toISOString(),
-            home_team: homeTeam,
-            away_team: awayTeam,
-            spread_line: null,
-            spread_home_bets_pct: null,
-            spread_home_money_pct: null,
-            spread_away_bets_pct: null,
-            spread_away_money_pct: null,
-            spread_diff: null,
-            spread_total_bets: null,
-            total_line: null,
-            over_bets_pct: null,
-            over_money_pct: null,
-            under_bets_pct: null,
-            under_money_pct: null,
-            total_diff: null,
-            total_bets: null,
-            ml_home_odds: null,
-            ml_away_odds: null,
-            ml_diff: null,
-            ml_total_bets: null,
-          };
-
-          const allText = row.textContent;
-          const percentMatches = allText.match(/(\d{1,3})%/g);
+          const text = row.textContent;
+          console.log(`\nRow ${index}: ${text.substring(0, 150)}`);
           
-          if (percentMatches && percentMatches.length >= 4) {
-            game.spread_away_bets_pct = parseInt(percentMatches[0]);
-            game.spread_away_money_pct = parseInt(percentMatches[1]);
-            game.spread_home_bets_pct = 100 - game.spread_away_bets_pct;
-            game.spread_home_money_pct = 100 - game.spread_away_money_pct;
-            game.spread_diff = game.spread_home_money_pct - game.spread_home_bets_pct;
+          // Extract team names - look for text before numbers
+          const teamNames = [];
+          const cells = row.querySelectorAll('td, div');
+          
+          cells.forEach(cell => {
+            const cellText = cell.textContent?.trim();
+            // Team names are typically 2-20 characters, all letters
+            if (cellText && cellText.length >= 3 && cellText.length <= 20) {
+              // Common NBA team names
+              const teamPattern = /^[A-Za-z0-9\s]+$/;
+              if (teamPattern.test(cellText) && !cellText.includes('%') && !cellText.includes('+') && !cellText.includes('-') && !cellText.includes('.')) {
+                teamNames.push(cellText);
+              }
+            }
+          });
+          
+          console.log(`Team names found:`, teamNames.slice(0, 4));
+          
+          if (teamNames.length < 2) {
+            console.log('Skipping - not enough team names');
+            return;
           }
-
-          if (percentMatches && percentMatches.length >= 8) {
-            game.over_bets_pct = parseInt(percentMatches[4]);
-            game.over_money_pct = parseInt(percentMatches[5]);
-            game.under_bets_pct = 100 - game.over_bets_pct;
-            game.under_money_pct = 100 - game.over_money_pct;
-            game.total_diff = game.over_money_pct - game.over_bets_pct;
+          
+          // First two distinct names are the teams
+          const awayTeam = teamNames[0];
+          const homeTeam = teamNames[1];
+          const gameKey = `${awayTeam}_${homeTeam}`;
+          
+          console.log(`Processing game: ${awayTeam} @ ${homeTeam}`);
+          
+          // Get or create game object
+          if (!gameMap.has(gameKey)) {
+            gameMap.set(gameKey, {
+              game_id: `${awayTeam.replace(/\s+/g, '_')}_${homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
+              sport: sportName.toUpperCase(),
+              scheduled_time: new Date().toISOString(),
+              home_team: homeTeam,
+              away_team: awayTeam,
+              spread_line: null,
+              spread_home_bets_pct: null,
+              spread_home_money_pct: null,
+              spread_away_bets_pct: null,
+              spread_away_money_pct: null,
+              spread_diff: null,
+              spread_total_bets: null,
+              total_line: null,
+              over_bets_pct: null,
+              over_money_pct: null,
+              under_bets_pct: null,
+              under_money_pct: null,
+              total_diff: null,
+              total_bets: null,
+              ml_home_odds: null,
+              ml_away_odds: null,
+              ml_diff: null,
+              ml_total_bets: null,
+            });
           }
-
-          const betMatches = allText.match(/[\d,]+(?=\s|$)/g);
-          if (betMatches) {
-            const betCounts = betMatches
-              .map(m => parseInt(m.replace(/,/g, '')))
-              .filter(n => n > 100 && n < 1000000);
+          
+          const game = gameMap.get(gameKey);
+          
+          // Extract percentages
+          const percentMatches = text.match(/(\d{1,3})%/g);
+          console.log(`Percentages:`, percentMatches?.slice(0, 6));
+          
+          // Determine row type by looking for indicators
+          const isSpreadRow = text.includes('+') && text.includes('-') && !text.includes('o') && !text.includes('u');
+          const isTotalRow = text.includes('o2') || text.includes('u2') || text.includes('o1') || text.includes('u1');
+          const isMoneylineRow = !isTotalRow && (text.match(/[+-]\d{3}/g)?.length || 0) >= 1;
+          
+          if (percentMatches && percentMatches.length >= 2) {
+            const bets = parseInt(percentMatches[0]);
+            const money = parseInt(percentMatches[1]);
+            const diff = money - bets;
             
-            if (betCounts.length > 0) {
-              game.spread_total_bets = betCounts[0];
-              if (betCounts.length > 1) game.total_bets = betCounts[1];
+            // Extract bet count
+            const betCountMatch = text.match(/(\d{1,3}(?:,\d{3})+|\d{4,})/);
+            const betCount = betCountMatch ? parseInt(betCountMatch[0].replace(/,/g, '')) : null;
+            
+            console.log(`Data: ${bets}% bets, ${money}% money, diff: ${diff}%, count: ${betCount}`);
+            
+            // Assign to appropriate market type
+            if (isTotalRow && text.includes('o')) {
+              // Over row
+              game.over_bets_pct = bets;
+              game.over_money_pct = money;
+              game.total_diff = diff;
+              game.total_bets = betCount;
+              
+              const totalLineMatch = text.match(/o(\d{3}(?:\.\d)?)/);
+              if (totalLineMatch) game.total_line = parseFloat(totalLineMatch[1]);
+              
+              console.log(`✅ Assigned to OVER`);
+            } else if (isTotalRow && text.includes('u')) {
+              // Under row - just record bet count if not set
+              if (!game.total_bets && betCount) {
+                game.total_bets = betCount;
+              }
+              console.log(`✅ Assigned to UNDER (count only)`);
+            } else if (!game.spread_home_bets_pct) {
+              // First occurrence - assume spread
+              game.spread_home_bets_pct = 100 - bets;
+              game.spread_home_money_pct = 100 - money;
+              game.spread_away_bets_pct = bets;
+              game.spread_away_money_pct = money;
+              game.spread_diff = diff;
+              game.spread_total_bets = betCount;
+              
+              const spreadMatch = text.match(/([+-]\d+(?:\.\d)?)/);
+              if (spreadMatch) game.spread_line = parseFloat(spreadMatch[0]);
+              
+              console.log(`✅ Assigned to SPREAD`);
             }
           }
-
-          const diffMatches = allText.match(/([+-]\d{1,2})%/g);
-          if (diffMatches && diffMatches.length > 0) {
-            game.spread_diff = parseInt(diffMatches[0]);
-            if (diffMatches.length > 1) game.total_diff = parseInt(diffMatches[1]);
-          }
-
-          console.log(`Parsed game ${index + 1}: ${awayTeam} @ ${homeTeam}`);
-          results.push(game);
+          
         } catch (err) {
           console.error(`Error parsing row ${index}:`, err.message);
         }
+      });
+
+      // Convert map to array
+      gameMap.forEach(game => {
+        console.log(`Final game: ${game.away_team} @ ${game.home_team} - Spread: ${game.spread_diff}%, Total: ${game.total_diff}%`);
+        results.push(game);
       });
 
       return results;
@@ -302,9 +309,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
     if (games.length > 0) {
       console.log('📄 Sample game:', JSON.stringify(games[0], null, 2));
     } else {
-      console.log('⚠️  No games extracted - checking page content...');
-      const bodyHTML = await page.evaluate(() => document.body.innerHTML);
-      console.log('📄 Page HTML snippet:', bodyHTML.substring(0, 500));
+      console.log('⚠️  No games extracted');
     }
 
     await browser.close();
