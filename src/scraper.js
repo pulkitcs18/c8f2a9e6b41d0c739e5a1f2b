@@ -102,12 +102,9 @@ export async function scrapeActionNetwork(sport = 'nba') {
     console.log('🖱️  Looking for market filter dropdown...');
     
     const dropdownSelectors = [
+      'select',
       'button:has-text("Spread")',
       '[data-testid*="market-filter"]',
-      'button[aria-label*="market"]',
-      'select',
-      'button:has-text("Total")',
-      'button:has-text("Moneyline")',
     ];
 
     // Try to click the dropdown
@@ -146,7 +143,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
     // Click "All Markets" option
     console.log('🖱️  Selecting "All Markets" option...');
     await page.evaluate(() => {
-      const allElements = Array.from(document.querySelectorAll('button, div, span, li'));
+      const allElements = Array.from(document.querySelectorAll('button, div, span, li, option'));
       const allMarketsOption = allElements.find(el => 
         el.textContent?.trim().toLowerCase() === 'all markets'
       );
@@ -160,52 +157,101 @@ export async function scrapeActionNetwork(sport = 'nba') {
     await new Promise(resolve => setTimeout(resolve, 5000));
     console.log('✅ Page updated with all markets');
 
+    // ==================== HTML STRUCTURE DEBUG ====================
+    console.log('🔍 Starting HTML structure debug...');
+    
+    const htmlDebug = await page.evaluate(() => {
+      const rows = document.querySelectorAll('tbody tr');
+      const samples = [];
+      
+      for (let i = 0; i < Math.min(3, rows.length); i++) {
+        const row = rows[i];
+        const cells = Array.from(row.querySelectorAll('td, th'));
+        
+        samples.push({
+          rowIndex: i,
+          fullText: row.textContent.trim(),
+          fullHTML: row.outerHTML.substring(0, 1000),
+          cells: cells.map((cell, idx) => ({
+            cellIndex: idx,
+            text: cell.textContent.trim(),
+            classes: cell.className,
+            html: cell.innerHTML.substring(0, 300)
+          }))
+        });
+      }
+      
+      return { totalRows: rows.length, samples };
+    });
+
+    console.log('\n========================================');
+    console.log('🔍 HTML STRUCTURE DEBUG');
+    console.log('========================================');
+    console.log('Total rows found:', htmlDebug.totalRows);
+    
+    htmlDebug.samples.forEach(row => {
+      console.log(`\n--- ROW ${row.rowIndex} ---`);
+      console.log('Full text:', row.fullText.substring(0, 250));
+      console.log('\nCells breakdown:');
+      row.cells.forEach(c => {
+        console.log(`  Cell ${c.cellIndex}:`);
+        console.log(`    Text: "${c.text.substring(0, 80)}"`);
+        console.log(`    Classes: "${c.classes}"`);
+        console.log(`    HTML snippet: ${c.html.substring(0, 150)}`);
+      });
+      console.log('\nRow HTML:', row.fullHTML);
+      console.log('---');
+    });
+    console.log('========================================\n');
+    // ==================== END HTML DEBUG ====================
+
     // Extract data
     console.log('📥 Extracting betting data...');
     const games = await page.evaluate((sportName) => {
       const results = [];
-      const gameMap = new Map(); // Track games by matchup
+      const gameMap = new Map();
       
-      // Find all table rows
       const rows = document.querySelectorAll('tbody tr');
       console.log(`Found ${rows.length} total rows`);
 
       rows.forEach((row, index) => {
         try {
           const text = row.textContent;
-          console.log(`\nRow ${index}: ${text.substring(0, 150)}`);
           
-          // Extract team names - look for text before numbers
+          // Extract team names
           const teamNames = [];
-          const cells = row.querySelectorAll('td, div');
+          const cells = row.querySelectorAll('td, div, span');
           
           cells.forEach(cell => {
-            const cellText = cell.textContent?.trim();
-            // Team names are typically 2-20 characters, all letters
-            if (cellText && cellText.length >= 3 && cellText.length <= 20) {
-              // Common NBA team names
-              const teamPattern = /^[A-Za-z0-9\s]+$/;
-              if (teamPattern.test(cellText) && !cellText.includes('%') && !cellText.includes('+') && !cellText.includes('-') && !cellText.includes('.')) {
+            let cellText = cell.textContent?.trim();
+            if (!cellText) return;
+            
+            // Remove common suffixes and numbers
+            cellText = cellText
+              .replace(/[A-Z]{2,3}\d{3}/g, '') // Remove NOP551, CHA552
+              .replace(/\d+/g, '') // Remove all numbers
+              .replace(/[^\w\s]/g, '') // Remove special chars
+              .trim();
+            
+            if (cellText.length >= 3 && cellText.length <= 20) {
+              const isTeamName = /^[A-Za-z]+$/.test(cellText) || cellText === '76ers';
+              const excludeWords = ['spread', 'total', 'moneyline', 'open', 'best', 'odds', 'bets', 'money', 'diff', 'scheduled'];
+              const isExcluded = excludeWords.some(word => cellText.toLowerCase().includes(word));
+              
+              if (isTeamName && !isExcluded && !teamNames.includes(cellText)) {
                 teamNames.push(cellText);
               }
             }
           });
           
-          console.log(`Team names found:`, teamNames.slice(0, 4));
-          
           if (teamNames.length < 2) {
-            console.log('Skipping - not enough team names');
             return;
           }
           
-          // First two distinct names are the teams
           const awayTeam = teamNames[0];
           const homeTeam = teamNames[1];
           const gameKey = `${awayTeam}_${homeTeam}`;
           
-          console.log(`Processing game: ${awayTeam} @ ${homeTeam}`);
-          
-          // Get or create game object
           if (!gameMap.has(gameKey)) {
             gameMap.set(gameKey, {
               game_id: `${awayTeam.replace(/\s+/g, '_')}_${homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
@@ -238,55 +284,47 @@ export async function scrapeActionNetwork(sport = 'nba') {
           
           // Extract percentages
           const percentMatches = text.match(/(\d{1,3})%/g);
-          console.log(`Percentages:`, percentMatches?.slice(0, 6));
-          
-          // Determine row type by looking for indicators
-          const isSpreadRow = text.includes('+') && text.includes('-') && !text.includes('o') && !text.includes('u');
-          const isTotalRow = text.includes('o2') || text.includes('u2') || text.includes('o1') || text.includes('u1');
-          const isMoneylineRow = !isTotalRow && (text.match(/[+-]\d{3}/g)?.length || 0) >= 1;
           
           if (percentMatches && percentMatches.length >= 2) {
-            const bets = parseInt(percentMatches[0]);
-            const money = parseInt(percentMatches[1]);
+            const bets = parseInt(percentMatches[0].replace('%', ''));
+            const money = parseInt(percentMatches[1].replace('%', ''));
             const diff = money - bets;
             
-            // Extract bet count
             const betCountMatch = text.match(/(\d{1,3}(?:,\d{3})+|\d{4,})/);
             const betCount = betCountMatch ? parseInt(betCountMatch[0].replace(/,/g, '')) : null;
             
-            console.log(`Data: ${bets}% bets, ${money}% money, diff: ${diff}%, count: ${betCount}`);
+            const hasOverLine = /o\d{3}/.test(text);
+            const hasUnderLine = /u\d{3}/.test(text);
+            const hasSpreadLine = /[+-]\d+\.?\d*/.test(text) && !hasOverLine && !hasUnderLine;
             
-            // Assign to appropriate market type
-            if (isTotalRow && text.includes('o')) {
-              // Over row
+            if (hasOverLine) {
               game.over_bets_pct = bets;
               game.over_money_pct = money;
+              game.under_bets_pct = 100 - bets;
+              game.under_money_pct = 100 - money;
               game.total_diff = diff;
-              game.total_bets = betCount;
+              if (betCount) game.total_bets = betCount;
               
               const totalLineMatch = text.match(/o(\d{3}(?:\.\d)?)/);
-              if (totalLineMatch) game.total_line = parseFloat(totalLineMatch[1]);
-              
-              console.log(`✅ Assigned to OVER`);
-            } else if (isTotalRow && text.includes('u')) {
-              // Under row - just record bet count if not set
+              if (totalLineMatch) {
+                game.total_line = parseFloat(totalLineMatch[1]);
+              }
+            } else if (hasUnderLine) {
               if (!game.total_bets && betCount) {
                 game.total_bets = betCount;
               }
-              console.log(`✅ Assigned to UNDER (count only)`);
-            } else if (!game.spread_home_bets_pct) {
-              // First occurrence - assume spread
-              game.spread_home_bets_pct = 100 - bets;
-              game.spread_home_money_pct = 100 - money;
+            } else if (hasSpreadLine && !game.spread_home_bets_pct) {
               game.spread_away_bets_pct = bets;
               game.spread_away_money_pct = money;
+              game.spread_home_bets_pct = 100 - bets;
+              game.spread_home_money_pct = 100 - money;
               game.spread_diff = diff;
-              game.spread_total_bets = betCount;
+              if (betCount) game.spread_total_bets = betCount;
               
-              const spreadMatch = text.match(/([+-]\d+(?:\.\d)?)/);
-              if (spreadMatch) game.spread_line = parseFloat(spreadMatch[0]);
-              
-              console.log(`✅ Assigned to SPREAD`);
+              const spreadMatch = text.match(/([+-]\d+\.?\d*)/);
+              if (spreadMatch) {
+                game.spread_line = parseFloat(spreadMatch[0]);
+              }
             }
           }
           
@@ -295,9 +333,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
         }
       });
 
-      // Convert map to array
       gameMap.forEach(game => {
-        console.log(`Final game: ${game.away_team} @ ${game.home_team} - Spread: ${game.spread_diff}%, Total: ${game.total_diff}%`);
         results.push(game);
       });
 
