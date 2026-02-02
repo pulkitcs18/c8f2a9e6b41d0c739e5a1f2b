@@ -9,6 +9,172 @@ if (!EMAIL || !PASSWORD) {
   process.exit(1);
 }
 
+// Helper function to click dropdown and select a market type
+async function selectMarketType(page, marketType) {
+  console.log(`\n🖱️  Selecting "${marketType}" from dropdown...`);
+
+  // Click the dropdown trigger (look for current market type text)
+  const dropdownClicked = await page.evaluate(() => {
+    const marketTexts = ['Spread', 'Total', 'Moneyline', 'All Markets'];
+    const allElements = Array.from(document.querySelectorAll('*'));
+
+    for (const el of allElements) {
+      const text = el.textContent?.trim();
+      const rect = el.getBoundingClientRect();
+
+      // Find dropdown trigger near top of page
+      if (marketTexts.includes(text) &&
+        rect.top > 80 && rect.top < 180 &&
+        rect.height > 20 && rect.height < 50 &&
+        rect.width > 60 && rect.width < 250) {
+        console.log('Clicking dropdown trigger:', text, el.tagName);
+        el.click();
+        return text;
+      }
+    }
+    return null;
+  });
+
+  if (dropdownClicked) {
+    console.log(`✅ Clicked dropdown (was showing: ${dropdownClicked})`);
+  } else {
+    console.log('⚠️  Could not find dropdown trigger');
+    return false;
+  }
+
+  // Wait for dropdown menu to appear
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  // Click the target market type
+  const selected = await page.evaluate((targetMarket) => {
+    const allElements = Array.from(document.querySelectorAll('*'));
+
+    for (const el of allElements) {
+      const text = el.textContent?.trim();
+      const rect = el.getBoundingClientRect();
+
+      // Find exact match for target market in dropdown menu
+      if (text === targetMarket &&
+        rect.width > 0 && rect.height > 0 &&
+        rect.width < 200 && rect.height < 50) {
+        console.log('Clicking menu item:', text);
+        el.click();
+        return true;
+      }
+    }
+    return false;
+  }, marketType);
+
+  if (selected) {
+    console.log(`✅ Selected "${marketType}"`);
+  } else {
+    console.log(`⚠️  Could not find "${marketType}" in dropdown menu`);
+    // Click somewhere to close dropdown
+    await page.mouse.click(100, 100);
+  }
+
+  // Wait for page to update
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
+  return selected;
+}
+
+// Helper function to extract data for current market type
+async function extractMarketData(page, marketType) {
+  console.log(`📥 Extracting ${marketType} data...`);
+
+  const data = await page.evaluate((market) => {
+    const results = [];
+    const rows = document.querySelectorAll('tbody tr');
+
+    rows.forEach((row, index) => {
+      try {
+        const text = row.textContent || '';
+
+        // Extract team names from game-info elements
+        const teamElements = row.querySelectorAll('.game-info__team--desktop span, .game-info__team-info span');
+        const teamNames = [];
+        teamElements.forEach(el => {
+          const name = el.textContent?.trim();
+          if (name && name.length > 2 && name.length < 25 && /^[A-Za-z0-9\s]+$/.test(name)) {
+            if (!teamNames.includes(name)) {
+              teamNames.push(name);
+            }
+          }
+        });
+
+        // Need at least 2 teams
+        if (teamNames.length < 2) return;
+
+        const awayTeam = teamNames[0];
+        const homeTeam = teamNames[1];
+
+        // Extract percentages
+        const percentElements = row.querySelectorAll('.public-betting__percent, [class*="percent"]');
+        const percentages = [];
+        percentElements.forEach(el => {
+          const match = el.textContent?.match(/(\d{1,3})%/);
+          if (match) {
+            percentages.push(parseInt(match[1]));
+          }
+        });
+
+        // Extract odds/line from BEST ODDS column
+        const oddsElements = row.querySelectorAll('.book-cell__odds, [data-testid="book-cell__odds"]');
+        let line1 = null, line2 = null;
+        oddsElements.forEach((el, i) => {
+          const oddsText = el.textContent?.trim();
+          if (i === 0) line1 = oddsText;
+          if (i === 1) line2 = oddsText;
+        });
+
+        // Extract bet count
+        const betsElement = row.querySelector('.public-betting__number-of-bets, [class*="number-of-bets"]');
+        let totalBets = null;
+        if (betsElement) {
+          const betsMatch = betsElement.textContent?.match(/([\d,]+)/);
+          if (betsMatch) {
+            totalBets = parseInt(betsMatch[1].replace(/,/g, ''));
+          }
+        }
+
+        // Extract diff percentage
+        const diffElement = row.querySelector('.public-betting__diff-percentage, [class*="diff"]');
+        let diff = null;
+        if (diffElement) {
+          const diffMatch = diffElement.textContent?.match(/([+-]?\d+)%?/);
+          if (diffMatch) {
+            diff = parseInt(diffMatch[1]);
+          }
+        }
+
+        results.push({
+          awayTeam,
+          homeTeam,
+          market,
+          line1,
+          line2,
+          awayBetsPct: percentages[0] || null,
+          homeBetsPct: percentages[1] || null,
+          awayMoneyPct: percentages[2] || null,
+          homeMoneyPct: percentages[3] || null,
+          diff,
+          totalBets,
+          rowIndex: index,
+        });
+
+      } catch (err) {
+        console.error('Row parse error:', err.message);
+      }
+    });
+
+    return results;
+  }, marketType);
+
+  console.log(`  Extracted ${data.length} rows for ${marketType}`);
+  return data;
+}
+
 export async function scrapeActionNetwork(sport = 'nba') {
   const url = `https://www.actionnetwork.com/${sport.toLowerCase()}/public-betting`;
   console.log(`\n🔍 Starting scrape: ${url}`);
@@ -39,10 +205,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
     );
     console.log('✅ Page configured');
 
-    // Go to homepage
+    // ==================== LOGIN ====================
     console.log('🔐 Navigating to Action Network homepage...');
     await page.goto('https://www.actionnetwork.com/', {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle2',
       timeout: 60000,
     });
     console.log('✅ Homepage loaded');
@@ -83,471 +249,188 @@ export async function scrapeActionNetwork(sport = 'nba') {
     await page.click('button[type="submit"]');
     console.log('✅ Login button clicked');
 
-    // Wait for login to complete
+    // Wait for login to complete and verify
     await new Promise(resolve => setTimeout(resolve, 5000));
-    console.log('✅ Login completed');
 
-    // Navigate to public betting page with All Markets filter
-    // Try the URL with query parameter first (some sites support this)
+    // Check if still on homepage (login succeeded) or got redirected 
+    const loginStatus = await page.evaluate(() => {
+      const hasSignIn = document.body?.textContent?.includes('Sign In');
+      const hasMyAccount = document.body?.textContent?.includes('My Account') ||
+        document.body?.textContent?.includes('Profile') ||
+        document.querySelector('[class*="avatar"]') !== null;
+      return { hasSignIn, hasMyAccount };
+    });
+    console.log(`📊 Login status - Sign In visible: ${loginStatus.hasSignIn}, Profile visible: ${loginStatus.hasMyAccount}`);
+
+    if (loginStatus.hasSignIn && !loginStatus.hasMyAccount) {
+      console.log('⚠️  Login may have failed - Sign In button still visible');
+    } else {
+      console.log('✅ Login completed');
+    }
+
+    // ==================== NAVIGATE TO PUBLIC BETTING ====================
     console.log('📊 Navigating to public betting page...');
-
-    // First try with market=all query param
-    const allMarketsUrl = `${url}?market=all`;
-    console.log(`📊 Trying All Markets URL: ${allMarketsUrl}`);
-
-    await page.goto(allMarketsUrl, {
-      waitUntil: 'domcontentloaded',
+    await page.goto(url, {
+      waitUntil: 'networkidle2',
       timeout: 60000,
     });
     console.log('✅ Public betting page loaded');
 
-    // Wait for page to load
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Check if we got All Markets or need to click the dropdown
-    const currentFilter = await page.evaluate(() => {
-      // Look for the filter indicator - what does the dropdown currently show?
-      const allElements = document.querySelectorAll('*');
-      for (const el of allElements) {
-        const text = el.textContent?.trim();
-        const rect = el.getBoundingClientRect();
-
-        // Find elements that look like dropdown values near top of page
-        if (rect.top < 200 && rect.width > 50 && rect.width < 300) {
-          if (text === 'All Markets' || text === 'Spread' || text === 'Total' || text === 'Moneyline') {
-            return text;
-          }
-        }
-      }
-      return 'unknown';
-    });
-
-    console.log(`📊 Current filter appears to be: ${currentFilter}`);
-
-    // ==================== SELECT "ALL MARKETS" ====================
-    // Skip if already showing All Markets (URL param worked)
-    if (currentFilter === 'All Markets') {
-      console.log('✅ Already showing All Markets - no dropdown click needed');
-    } else {
-      console.log('🖱️  Need to select All Markets from dropdown...');
-
-      // Step 1: Find and click the Spread/market dropdown
-      console.log('🖱️  Step 1: Looking for market dropdown...');
-
-      const spreadDropdownFound = await page.evaluate(() => {
-        // Find all elements in the filter area that could be dropdowns
-        const candidates = [];
-
-        document.querySelectorAll('*').forEach(el => {
-          const text = el.textContent?.trim();
-          const rect = el.getBoundingClientRect();
-          const tagName = el.tagName.toLowerCase();
-
-          // Look for Spread text in a small, clickable element near page top
-          if (text === 'Spread' &&
-            rect.top > 50 && rect.top < 250 &&
-            rect.height > 20 && rect.height < 60 &&
-            rect.width > 60 && rect.width < 400) {
-
-            candidates.push({
-              element: el,
-              tag: tagName,
-              classes: el.className,
-              top: rect.top,
-              left: rect.left
-            });
-          }
-        });
-
-        console.log('Spread candidates:', candidates.length);
-
-        // Find the innermost element (most specific) to click
-        if (candidates.length > 0) {
-          // Sort by element depth (we want the deepest/most specific element)
-          candidates.sort((a, b) => {
-            const depthA = getDepth(a.element);
-            const depthB = getDepth(b.element);
-            return depthB - depthA;
-          });
-
-          function getDepth(el) {
-            let depth = 0;
-            let current = el;
-            while (current.parentElement) {
-              depth++;
-              current = current.parentElement;
-            }
-            return depth;
-          }
-
-          // Click the most specific element
-          const toClick = candidates[0];
-          console.log('Clicking:', toClick.tag, toClick.classes);
-          toClick.element.click();
-          return true;
-        }
-
-        return false;
-      });
-
-      if (spreadDropdownFound) {
-        console.log('✅ Clicked something in the Spread area');
-      } else {
-        console.log('⚠️  Could not find Spread dropdown');
-      }
-
-      // Wait for dropdown menu to appear
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Step 2: Look for All Markets option and click it
-      console.log('🖱️  Step 2: Looking for All Markets option...');
-
-      const allMarketsClicked = await page.evaluate(() => {
-        // Find elements with exact "All Markets" text
-        const candidates = [];
-
-        document.querySelectorAll('*').forEach(el => {
-          const text = el.textContent?.trim();
-          const rect = el.getBoundingClientRect();
-
-          // Look for "All Markets" - it should be visible and small enough to be a menu item
-          if (text === 'All Markets' &&
-            rect.width > 0 && rect.height > 0 &&
-            rect.width < 300 && rect.height < 60) {
-
-            candidates.push({
-              element: el,
-              tag: el.tagName.toLowerCase(),
-              width: rect.width,
-              height: rect.height
-            });
-          }
-        });
-
-        console.log('All Markets candidates:', candidates.length);
-
-        if (candidates.length > 0) {
-          // Click the first visible All Markets element
-          for (const c of candidates) {
-            try {
-              c.element.click();
-              console.log('Clicked All Markets:', c.tag, c.width, c.height);
-              return true;
-            } catch (e) {
-              console.log('Click failed:', e.message);
-            }
-          }
-        }
-
-        return false;
-      });
-
-      if (allMarketsClicked) {
-        console.log('✅ Selected All Markets');
-      } else {
-        console.log('⚠️  Could not click All Markets - trying alternate approaches...');
-
-        // Try Tab + Enter navigation as fallback
-        try {
-          // Press Tab 3 times to get to the dropdown, then arrow down to All Markets
-          await page.keyboard.press('Tab');
-          await page.keyboard.press('Tab');
-          await page.keyboard.press('Tab');
-          await page.keyboard.press('Enter'); // Open dropdown
-          await new Promise(resolve => setTimeout(resolve, 500));
-          await page.keyboard.press('ArrowDown');
-          await page.keyboard.press('ArrowDown');
-          await page.keyboard.press('ArrowDown');
-          await page.keyboard.press('Enter'); // Select All Markets (4th option)
-          console.log('✅ Used keyboard navigation for All Markets');
-        } catch (e) {
-          console.log('⚠️  Keyboard navigation failed:', e.message);
-        }
-      }
-    }
-
-    // Wait for page to update with all markets data
+    // Wait for page to fully render
     await new Promise(resolve => setTimeout(resolve, 5000));
-    console.log('✅ Page ready for data extraction');
 
-    // ==================== PAGE STATE DEBUG ====================
-    console.log('🔍 Debugging page state...');
-
-    const pageState = await page.evaluate(() => {
-      const state = {
+    // Verify we're on the right page with data
+    const pageCheck = await page.evaluate(() => {
+      return {
         url: window.location.href,
-        title: document.title,
-        bodyTextSnippet: document.body?.textContent?.substring(0, 500) || 'no body',
-        hasTable: !!document.querySelector('table'),
-        hasTbody: !!document.querySelector('tbody'),
-        tbodyRowCount: document.querySelectorAll('tbody tr').length,
-        allTrCount: document.querySelectorAll('tr').length,
-        hasPublicBetting: document.body?.textContent?.includes('Public Betting') || false,
-        hasSignIn: document.body?.textContent?.includes('Sign In') || false,
-        hasUpgrade: document.body?.textContent?.includes('upgrade') || document.body?.textContent?.includes('PRO') || false,
-        visibleDropdownText: '',
-        possibleGameContainers: 0,
+        rowCount: document.querySelectorAll('tbody tr').length,
+        hasPublicBetting: document.body?.textContent?.includes('Public Betting'),
+        hasLockedContent: document.body?.textContent?.includes('Locked Content'),
       };
-
-      // Look for the dropdown value
-      const dropdownCandidates = document.querySelectorAll('*');
-      for (const el of dropdownCandidates) {
-        const text = el.textContent?.trim();
-        const rect = el.getBoundingClientRect();
-        if ((text === 'Spread' || text === 'All Markets' || text === 'Total' || text === 'Moneyline') &&
-          rect.top > 50 && rect.top < 200 && rect.width > 50 && rect.width < 300) {
-          state.visibleDropdownText = text;
-          break;
-        }
-      }
-
-      // Look for game-related containers with various selectors
-      const gameSelectors = [
-        '.public-betting__game-info',
-        '[class*="game-info"]',
-        '[class*="GameInfo"]',
-        '[class*="matchup"]',
-        '[class*="event"]',
-        'tr',
-        '[data-testid*="game"]',
-        '[data-testid*="row"]',
-      ];
-
-      for (const sel of gameSelectors) {
-        const count = document.querySelectorAll(sel).length;
-        if (count > 0) {
-          state.possibleGameContainers = Math.max(state.possibleGameContainers, count);
-        }
-      }
-
-      return state;
     });
 
-    console.log('📊 PAGE STATE:');
-    console.log('  URL:', pageState.url);
-    console.log('  Title:', pageState.title);
-    console.log('  Has table:', pageState.hasTable);
-    console.log('  Has tbody:', pageState.hasTbody);
-    console.log('  Tbody row count:', pageState.tbodyRowCount);
-    console.log('  All tr count:', pageState.allTrCount);
-    console.log('  Has "Public Betting":', pageState.hasPublicBetting);
-    console.log('  Has "Sign In" button:', pageState.hasSignIn);
-    console.log('  Has upgrade/PRO:', pageState.hasUpgrade);
-    console.log('  Visible dropdown text:', pageState.visibleDropdownText);
-    console.log('  Possible game containers:', pageState.possibleGameContainers);
-    console.log('  Body snippet:', pageState.bodyTextSnippet.substring(0, 200));
+    console.log(`📊 Page check - URL: ${pageCheck.url}`);
+    console.log(`  Rows: ${pageCheck.rowCount}, Has Public Betting: ${pageCheck.hasPublicBetting}`);
+    console.log(`  Has Locked Content: ${pageCheck.hasLockedContent}`);
 
-    // If no rows found, wait longer and retry
-    if (pageState.tbodyRowCount === 0) {
-      console.log('⚠️  No tbody rows found - waiting 5 more seconds...');
+    if (pageCheck.rowCount === 0) {
+      console.log('⚠️  No rows found - waiting longer...');
       await new Promise(resolve => setTimeout(resolve, 5000));
+    }
 
-      const retryRowCount = await page.evaluate(() => document.querySelectorAll('tbody tr').length);
-      console.log('  Retry tbody row count:', retryRowCount);
+    // ==================== SCRAPE EACH MARKET TYPE ====================
+    // Initialize game data map
+    const gameDataMap = new Map();
 
-      if (retryRowCount === 0) {
-        // Try navigating directly to public-betting page without query param
-        console.log('⚠️  Still no rows - trying direct navigation to public-betting page...');
-        await page.goto(`https://www.actionnetwork.com/${sport.toLowerCase()}/public-betting`, {
-          waitUntil: 'networkidle2',
-          timeout: 60000,
+    // 1. Scrape SPREAD (default - already loaded)
+    console.log('\n====== SCRAPING SPREAD DATA ======');
+    const spreadData = await extractMarketData(page, 'Spread');
+
+    for (const row of spreadData) {
+      const gameKey = `${row.awayTeam}_${row.homeTeam}`;
+      if (!gameDataMap.has(gameKey)) {
+        gameDataMap.set(gameKey, {
+          game_id: `${row.awayTeam.replace(/\s+/g, '_')}_${row.homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
+          sport: sport.toUpperCase(),
+          scheduled_time: new Date().toISOString(),
+          home_team: row.homeTeam,
+          away_team: row.awayTeam,
+          // Spread data
+          spread_line: null,
+          spread_home_bets_pct: null,
+          spread_home_money_pct: null,
+          spread_away_bets_pct: null,
+          spread_away_money_pct: null,
+          spread_diff: null,
+          spread_total_bets: null,
+          // Total data  
+          total_line: null,
+          over_bets_pct: null,
+          over_money_pct: null,
+          under_bets_pct: null,
+          under_money_pct: null,
+          total_diff: null,
+          total_bets: null,
+          // Moneyline data
+          ml_home_odds: null,
+          ml_away_odds: null,
+          ml_home_bets_pct: null,
+          ml_home_money_pct: null,
+          ml_away_bets_pct: null,
+          ml_away_money_pct: null,
+          ml_diff: null,
+          ml_total_bets: null,
         });
-        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
 
-        const finalRowCount = await page.evaluate(() => document.querySelectorAll('tbody tr').length);
-        console.log('  Final tbody row count after direct nav:', finalRowCount);
+      const game = gameDataMap.get(gameKey);
+      // Parse spread line
+      if (row.line1) {
+        const spreadMatch = row.line1.match(/([+-]?\d+\.?\d*)/);
+        if (spreadMatch) {
+          game.spread_line = parseFloat(spreadMatch[1]);
+        }
+      }
+      game.spread_away_bets_pct = row.awayBetsPct;
+      game.spread_home_bets_pct = row.homeBetsPct;
+      game.spread_away_money_pct = row.awayMoneyPct;
+      game.spread_home_money_pct = row.homeMoneyPct;
+      game.spread_diff = row.diff;
+      game.spread_total_bets = row.totalBets;
+    }
+
+    // 2. Scrape TOTAL
+    console.log('\n====== SCRAPING TOTAL DATA ======');
+    const totalSelected = await selectMarketType(page, 'Total');
+
+    if (totalSelected) {
+      const totalData = await extractMarketData(page, 'Total');
+
+      for (const row of totalData) {
+        const gameKey = `${row.awayTeam}_${row.homeTeam}`;
+        const game = gameDataMap.get(gameKey);
+
+        if (game) {
+          // Parse total line (o230.5 format)
+          if (row.line1) {
+            const totalMatch = row.line1.match(/[ou]?(\d+\.?\d*)/i);
+            if (totalMatch) {
+              game.total_line = parseFloat(totalMatch[1]);
+            }
+          }
+          game.over_bets_pct = row.awayBetsPct;
+          game.under_bets_pct = row.homeBetsPct;
+          game.over_money_pct = row.awayMoneyPct;
+          game.under_money_pct = row.homeMoneyPct;
+          game.total_diff = row.diff;
+          game.total_bets = row.totalBets;
+        }
       }
     }
 
-    // ==================== HTML STRUCTURE DEBUG ====================
-    console.log('🔍 Starting HTML structure debug...');
+    // 3. Scrape MONEYLINE
+    console.log('\n====== SCRAPING MONEYLINE DATA ======');
+    const mlSelected = await selectMarketType(page, 'Moneyline');
 
-    const htmlDebug = await page.evaluate(() => {
-      const rows = document.querySelectorAll('tbody tr');
-      const samples = [];
+    if (mlSelected) {
+      const mlData = await extractMarketData(page, 'Moneyline');
 
-      for (let i = 0; i < Math.min(3, rows.length); i++) {
-        const row = rows[i];
-        const cells = Array.from(row.querySelectorAll('td, th'));
+      for (const row of mlData) {
+        const gameKey = `${row.awayTeam}_${row.homeTeam}`;
+        const game = gameDataMap.get(gameKey);
 
-        samples.push({
-          rowIndex: i,
-          fullText: row.textContent.trim(),
-          fullHTML: row.outerHTML.substring(0, 1000),
-          cells: cells.map((cell, idx) => ({
-            cellIndex: idx,
-            text: cell.textContent.trim(),
-            classes: cell.className,
-            html: cell.innerHTML.substring(0, 300)
-          }))
-        });
-      }
-
-      return { totalRows: rows.length, samples };
-    });
-
-    console.log('\n========================================');
-    console.log('🔍 HTML STRUCTURE DEBUG');
-    console.log('========================================');
-    console.log('Total rows found:', htmlDebug.totalRows);
-
-    htmlDebug.samples.forEach(row => {
-      console.log(`\n--- ROW ${row.rowIndex} ---`);
-      console.log('Full text:', row.fullText.substring(0, 250));
-      console.log('\nCells breakdown:');
-      row.cells.forEach(c => {
-        console.log(`  Cell ${c.cellIndex}:`);
-        console.log(`    Text: "${c.text.substring(0, 80)}"`);
-        console.log(`    Classes: "${c.classes}"`);
-        console.log(`    HTML snippet: ${c.html.substring(0, 150)}`);
-      });
-      console.log('\nRow HTML:', row.fullHTML);
-      console.log('---');
-    });
-    console.log('========================================\n');
-    // ==================== END HTML DEBUG ====================
-
-    // Extract data
-    console.log('📥 Extracting betting data...');
-    const games = await page.evaluate((sportName) => {
-      const results = [];
-      const gameMap = new Map();
-
-      const rows = document.querySelectorAll('tbody tr');
-      console.log(`Found ${rows.length} total rows`);
-
-      rows.forEach((row, index) => {
-        try {
-          const text = row.textContent;
-
-          // Extract team names
-          const teamNames = [];
-          const cells = row.querySelectorAll('td, div, span');
-
-          cells.forEach(cell => {
-            let cellText = cell.textContent?.trim();
-            if (!cellText) return;
-
-            // Remove common suffixes and numbers
-            cellText = cellText
-              .replace(/[A-Z]{2,3}\d{3}/g, '') // Remove NOP551, CHA552
-              .replace(/\d+/g, '') // Remove all numbers
-              .replace(/[^\w\s]/g, '') // Remove special chars
-              .trim();
-
-            if (cellText.length >= 3 && cellText.length <= 20) {
-              const isTeamName = /^[A-Za-z]+$/.test(cellText) || cellText === '76ers';
-              const excludeWords = ['spread', 'total', 'moneyline', 'open', 'best', 'odds', 'bets', 'money', 'diff', 'scheduled'];
-              const isExcluded = excludeWords.some(word => cellText.toLowerCase().includes(word));
-
-              if (isTeamName && !isExcluded && !teamNames.includes(cellText)) {
-                teamNames.push(cellText);
-              }
-            }
-          });
-
-          if (teamNames.length < 2) {
-            return;
-          }
-
-          const awayTeam = teamNames[0];
-          const homeTeam = teamNames[1];
-          const gameKey = `${awayTeam}_${homeTeam}`;
-
-          if (!gameMap.has(gameKey)) {
-            gameMap.set(gameKey, {
-              game_id: `${awayTeam.replace(/\s+/g, '_')}_${homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
-              sport: sportName.toUpperCase(),
-              scheduled_time: new Date().toISOString(),
-              home_team: homeTeam,
-              away_team: awayTeam,
-              spread_line: null,
-              spread_home_bets_pct: null,
-              spread_home_money_pct: null,
-              spread_away_bets_pct: null,
-              spread_away_money_pct: null,
-              spread_diff: null,
-              spread_total_bets: null,
-              total_line: null,
-              over_bets_pct: null,
-              over_money_pct: null,
-              under_bets_pct: null,
-              under_money_pct: null,
-              total_diff: null,
-              total_bets: null,
-              ml_home_odds: null,
-              ml_away_odds: null,
-              ml_diff: null,
-              ml_total_bets: null,
-            });
-          }
-
-          const game = gameMap.get(gameKey);
-
-          // Extract percentages
-          const percentMatches = text.match(/(\d{1,3})%/g);
-
-          if (percentMatches && percentMatches.length >= 2) {
-            const bets = parseInt(percentMatches[0].replace('%', ''));
-            const money = parseInt(percentMatches[1].replace('%', ''));
-            const diff = money - bets;
-
-            const betCountMatch = text.match(/(\d{1,3}(?:,\d{3})+|\d{4,})/);
-            const betCount = betCountMatch ? parseInt(betCountMatch[0].replace(/,/g, '')) : null;
-
-            const hasOverLine = /o\d{3}/.test(text);
-            const hasUnderLine = /u\d{3}/.test(text);
-            const hasSpreadLine = /[+-]\d+\.?\d*/.test(text) && !hasOverLine && !hasUnderLine;
-
-            if (hasOverLine) {
-              game.over_bets_pct = bets;
-              game.over_money_pct = money;
-              game.under_bets_pct = 100 - bets;
-              game.under_money_pct = 100 - money;
-              game.total_diff = diff;
-              if (betCount) game.total_bets = betCount;
-
-              const totalLineMatch = text.match(/o(\d{3}(?:\.\d)?)/);
-              if (totalLineMatch) {
-                game.total_line = parseFloat(totalLineMatch[1]);
-              }
-            } else if (hasUnderLine) {
-              if (!game.total_bets && betCount) {
-                game.total_bets = betCount;
-              }
-            } else if (hasSpreadLine && !game.spread_home_bets_pct) {
-              game.spread_away_bets_pct = bets;
-              game.spread_away_money_pct = money;
-              game.spread_home_bets_pct = 100 - bets;
-              game.spread_home_money_pct = 100 - money;
-              game.spread_diff = diff;
-              if (betCount) game.spread_total_bets = betCount;
-
-              const spreadMatch = text.match(/([+-]\d+\.?\d*)/);
-              if (spreadMatch) {
-                game.spread_line = parseFloat(spreadMatch[0]);
-              }
+        if (game) {
+          // Parse moneyline odds (+235, -290 format)
+          if (row.line1) {
+            const mlMatch = row.line1.match(/([+-]?\d+)/);
+            if (mlMatch) {
+              game.ml_away_odds = parseInt(mlMatch[1]);
             }
           }
-
-        } catch (err) {
-          console.error(`Error parsing row ${index}:`, err.message);
+          if (row.line2) {
+            const mlMatch = row.line2.match(/([+-]?\d+)/);
+            if (mlMatch) {
+              game.ml_home_odds = parseInt(mlMatch[1]);
+            }
+          }
+          game.ml_away_bets_pct = row.awayBetsPct;
+          game.ml_home_bets_pct = row.homeBetsPct;
+          game.ml_away_money_pct = row.awayMoneyPct;
+          game.ml_home_money_pct = row.homeMoneyPct;
+          game.ml_diff = row.diff;
+          game.ml_total_bets = row.totalBets;
         }
-      });
+      }
+    }
 
-      gameMap.forEach(game => {
-        results.push(game);
-      });
+    // Convert map to array
+    const games = Array.from(gameDataMap.values());
 
-      return results;
-    }, sport);
-
-    console.log(`✅ Extracted ${games.length} games`);
+    console.log(`\n✅ Scraped ${games.length} games with all market data`);
 
     if (games.length > 0) {
-      console.log('📄 Sample game:', JSON.stringify(games[0], null, 2));
-    } else {
-      console.log('⚠️  No games extracted');
+      console.log('📄 Sample game:');
+      console.log(JSON.stringify(games[0], null, 2));
     }
 
     await browser.close();
@@ -565,6 +448,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
   }
 }
 
+// Direct run for testing
 if (import.meta.url === `file://${process.argv[1]}`) {
   console.log('🧪 Running scraper test...\n');
   import('dotenv/config');
