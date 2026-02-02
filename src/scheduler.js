@@ -6,10 +6,11 @@ const SPORT = process.env.SPORT || 'nba';
 
 export function startScheduler() {
   console.log('⏰ Starting scheduler...');
-  console.log(`📅 Will scrape ${SPORT.toUpperCase()} every 15 minutes`);
-  console.log(`🕐 Next run: ${new Date(Date.now() + 15 * 60 * 1000).toLocaleTimeString()}\n`);
+  console.log(`📅 Will scrape ${SPORT.toUpperCase()} every 2 hours`);
+  console.log(`🕐 Next run: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString()}\n`);
 
-  cron.schedule('*/15 * * * *', async () => {
+  // Run every 2 hours (at minute 0 of every even hour)
+  cron.schedule('0 */2 * * *', async () => {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`🚀 Scheduled scrape starting at ${new Date().toLocaleString()}`);
     console.log('='.repeat(60));
@@ -37,11 +38,11 @@ async function runScrapeJob() {
 
     console.log(`\n✅ Job completed in ${duration}ms`);
     console.log(`📊 Scraped ${games.length} games`);
-    console.log(`🕐 Next run: ${new Date(Date.now() + 15 * 60 * 1000).toLocaleTimeString()}\n`);
+    console.log(`🕐 Next run: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString()}\n`);
 
   } catch (error) {
     console.error('\n❌ Job failed:', error.message);
-    
+
     if (job) {
       const duration = Date.now() - startTime;
       await updateJobStatus(job.id, 'failed', 0, error.message, duration);
