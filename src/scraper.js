@@ -37,28 +37,50 @@ export async function scrapeActionNetwork(sport = 'nba') {
 
     console.log('🔐 Logging in to Action Network...');
     
+    // Navigate to login page with increased timeout
     await page.goto('https://www.actionnetwork.com/login', {
-      waitUntil: 'networkidle2',
-      timeout: 30000,
+      waitUntil: 'domcontentloaded',  // Less strict wait
+      timeout: 60000,  // Increased to 60 seconds
     });
 
-    await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 10000 });
-    await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 50 });
-    await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 50 });
+    // Wait for login form with increased timeout
+    await page.waitForSelector('input[type="email"], input[name="email"]', { 
+      timeout: 20000  // Increased to 20 seconds
+    });
+    
+    // Add small delay to ensure page is fully loaded
+    await page.waitForTimeout(2000);
+    
+    // Fill login form slowly
+    await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 100 });
+    await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 100 });
 
+    // Wait a bit before clicking
+    await page.waitForTimeout(1000);
+
+    // Click login button with increased timeout
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+      page.waitForNavigation({ 
+        waitUntil: 'domcontentloaded',  // Less strict
+        timeout: 60000  // Increased to 60 seconds
+      }),
       page.click('button[type="submit"]'),
     ]);
 
     console.log('✅ Logged in successfully');
+    
+    // Wait a bit after login
+    await page.waitForTimeout(3000);
+    
     console.log('📊 Loading public betting data...');
     
+    // Navigate to public betting page with increased timeout
     await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 30000,
+      waitUntil: 'domcontentloaded',  // Less strict
+      timeout: 60000,  // Increased to 60 seconds
     });
 
+    // Wait for data to load
     await page.waitForTimeout(5000);
 
     console.log('📥 Extracting betting data...');
