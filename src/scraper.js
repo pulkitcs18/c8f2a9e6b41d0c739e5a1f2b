@@ -37,51 +37,42 @@ export async function scrapeActionNetwork(sport = 'nba') {
 
     console.log('🔐 Logging in to Action Network...');
     
-    // Navigate to login page with increased timeout
     await page.goto('https://www.actionnetwork.com/login', {
-      waitUntil: 'domcontentloaded',  // Less strict wait
-      timeout: 60000,  // Increased to 60 seconds
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
     });
 
-    // Wait for login form with increased timeout
     await page.waitForSelector('input[type="email"], input[name="email"]', { 
-      timeout: 20000  // Increased to 20 seconds
+      timeout: 20000
     });
     
-    // Add small delay to ensure page is fully loaded
-    await page.waitForTimeout(2000);
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
-    // Fill login form slowly
     await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 100 });
     await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 100 });
 
-    // Wait a bit before clicking
-    await page.waitForTimeout(1000);
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Click login button with increased timeout
     await Promise.all([
       page.waitForNavigation({ 
-        waitUntil: 'domcontentloaded',  // Less strict
-        timeout: 60000  // Increased to 60 seconds
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
       }),
       page.click('button[type="submit"]'),
     ]);
 
     console.log('✅ Logged in successfully');
     
-    // Wait a bit after login
-    await page.waitForTimeout(3000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     console.log('📊 Loading public betting data...');
     
-    // Navigate to public betting page with increased timeout
     await page.goto(url, {
-      waitUntil: 'domcontentloaded',  // Less strict
-      timeout: 60000,  // Increased to 60 seconds
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
     });
 
-    // Wait for data to load
-    await page.waitForTimeout(5000);
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     console.log('📥 Extracting betting data...');
     const games = await page.evaluate((sportName) => {
