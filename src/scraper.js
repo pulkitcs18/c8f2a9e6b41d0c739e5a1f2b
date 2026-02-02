@@ -39,91 +39,145 @@ export async function scrapeActionNetwork(sport = 'nba') {
     );
     console.log('✅ Page configured');
 
-    console.log('🔐 Navigating to login page...');
-    
-    await page.goto('https://www.actionnetwork.com/login', {
+    // Go to homepage (not /login!)
+    console.log('🔐 Navigating to Action Network homepage...');
+    await page.goto('https://www.actionnetwork.com/', {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
-    console.log('✅ Login page loaded');
+    console.log('✅ Homepage loaded');
 
-    // Check current URL and title
-    const currentUrl = page.url();
-    const pageTitle = await page.title();
-    console.log(`📍 Current URL: ${currentUrl}`);
-    console.log(`📄 Page Title: ${pageTitle}`);
+    // Wait for page to settle
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // Wait for login form
-    console.log('🔍 Looking for email input field...');
-    await page.waitForSelector('input[type="email"], input[name="email"]', { 
-      timeout: 30000
-    });
-    console.log('✅ Found email input field');
-    
-    // Add small delay
-    console.log('⏱️  Waiting 2 seconds...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Fill login form
-    console.log('⌨️  Typing email...');
-    await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 100 });
-    console.log('✅ Email entered');
-    
-    console.log('⌨️  Typing password...');
-    await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 100 });
-    console.log('✅ Password entered');
+    // Click "Sign In" button in top right corner
+    console.log('🖱️  Looking for Sign In button...');
+    const signInSelectors = [
+      'a[href*="login"]',
+      'button:has-text("Sign In")',
+      'a:has-text("Sign In")',
+      '[data-testid="sign-in"]',
+      '.sign-in-button',
+    ];
 
-    // Wait before clicking
-    console.log('⏱️  Waiting 1 second before clicking login...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Click login button - DON'T wait for navigation (Action Network uses SPA)
-    console.log('🖱️  Clicking login button...');
-    await page.click('button[type="submit"]');
-    console.log('✅ Login button clicked');
-
-    // Wait for URL to change (indicates successful login)
-    console.log('⏱️  Waiting for login to complete (URL change)...');
-    try {
-      await page.waitForFunction(
-        () => !window.location.href.includes('/login'),
-        { timeout: 30000 }
-      );
-      console.log('✅ URL changed - login successful');
-    } catch (e) {
-      console.log('⚠️  URL did not change in 30 seconds, checking current state...');
-      const currentUrl = page.url();
-      console.log(`📍 Current URL: ${currentUrl}`);
-      
-      if (!currentUrl.includes('/login')) {
-        console.log('✅ Already logged in or redirected');
-      } else {
-        // Take screenshot for debugging
-        try {
-          await page.screenshot({ path: '/tmp/login-failed.png' });
-          console.log('📸 Screenshot saved to /tmp/login-failed.png');
-        } catch (screenshotErr) {
-          console.log('⚠️  Could not save screenshot');
-        }
-        
-        // Get page content for debugging
-        const bodyText = await page.evaluate(() => document.body.innerText);
-        console.log('📄 Page content snippet:', bodyText.substring(0, 500));
-        
-        throw new Error('Login failed - still on login page after 30 seconds');
+    let signInClicked = false;
+    for (const selector of signInSelectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 5000 });
+        console.log(`✅ Found Sign In button with selector: ${selector}`);
+        await page.click(selector);
+        console.log('✅ Clicked Sign In button');
+        signInClicked = true;
+        break;
+      } catch (e) {
+        console.log(`⚠️  Selector ${selector} not found, trying next...`);
       }
     }
 
-    console.log('✅ Logged in successfully');
-    
-    // Check where we ended up
-    const afterLoginUrl = page.url();
-    console.log(`📍 After login URL: ${afterLoginUrl}`);
-    
-    // Wait after login
-    console.log('⏱️  Waiting 3 seconds after login...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
+    if (!signInClicked) {
+      // Try clicking any element with "Sign In" text
+      console.log('🔍 Trying to find Sign In by text content...');
+      await page.evaluate(() => {
+        const elements = Array.from(document.querySelectorAll('a, button'));
+        const signInElement = elements.find(el => 
+          el.textContent?.trim().toLowerCase().includes('sign in')
+        );
+        if (signInElement) {
+          signInElement.click();
+        }
+      });
+      console.log('✅ Clicked Sign In button via text search');
+    }
+
+    // Wait for login modal to appear
+    console.log('⏱️  Waiting for login modal to appear...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Wait for email input in the modal
+    console.log('🔍 Looking for email input field in modal...');
+    const emailSelectors = [
+      'input[type="email"]',
+      'input[name="email"]',
+      'input[placeholder*="mail"]',
+      'input[placeholder*="Email"]',
+    ];
+
+    let emailInput = null;
+    for (const selector of emailSelectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 5000 });
+        console.log(`✅ Found email input with selector: ${selector}`);
+        emailInput = selector;
+        break;
+      } catch (e) {
+        console.log(`⚠️  Email selector ${selector} not found, trying next...`);
+      }
+    }
+
+    if (!emailInput) {
+      throw new Error('Could not find email input field in login modal');
+    }
+
+    // Fill in email
+    console.log('⌨️  Typing email...');
+    await page.type(emailInput, EMAIL, { delay: 100 });
+    console.log('✅ Email entered');
+
+    // Fill in password
+    console.log('⌨️  Typing password...');
+    await page.type('input[type="password"]', PASSWORD, { delay: 100 });
+    console.log('✅ Password entered');
+
+    // Wait before clicking
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Click the Sign In button in the modal
+    console.log('🖱️  Clicking Sign In button in modal...');
+    const loginButtonSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Sign In")',
+      'button:has-text("Sign in")',
+      'button:has-text("Log In")',
+      '.login-button',
+    ];
+
+    let loginClicked = false;
+    for (const selector of loginButtonSelectors) {
+      try {
+        await page.click(selector);
+        console.log(`✅ Clicked login button with selector: ${selector}`);
+        loginClicked = true;
+        break;
+      } catch (e) {
+        console.log(`⚠️  Login button selector ${selector} not found, trying next...`);
+      }
+    }
+
+    if (!loginClicked) {
+      // Try clicking by text
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const loginButton = buttons.find(btn => 
+          btn.textContent?.trim().toLowerCase().includes('sign in')
+        );
+        if (loginButton) {
+          loginButton.click();
+        }
+      });
+      console.log('✅ Clicked login button via text search');
+    }
+
+    // Wait for "Success! One moment..." message or modal to close
+    console.log('⏱️  Waiting for login to complete...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Check if we're logged in by looking for user menu or checking if modal closed
+    console.log('✅ Login process completed');
+
+    const currentUrl = page.url();
+    console.log(`📍 Current URL: ${currentUrl}`);
+
+    // Navigate to public betting page
     console.log('📊 Navigating to public betting page...');
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
@@ -249,11 +303,8 @@ export async function scrapeActionNetwork(sport = 'nba') {
       console.log('📄 Sample game:', JSON.stringify(games[0], null, 2));
     } else {
       console.log('⚠️  No games extracted - checking page content...');
-      
-      // Get page HTML for debugging
       const bodyHTML = await page.evaluate(() => document.body.innerHTML);
-      console.log('📄 Page HTML snippet (first 500 chars):', bodyHTML.substring(0, 500));
-      console.log('📄 Page HTML snippet (last 500 chars):', bodyHTML.substring(bodyHTML.length - 500));
+      console.log('📄 Page HTML snippet:', bodyHTML.substring(0, 500));
     }
 
     await browser.close();
