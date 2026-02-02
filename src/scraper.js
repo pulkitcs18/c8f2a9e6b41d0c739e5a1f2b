@@ -114,21 +114,53 @@ async function extractMarketData(page, marketType) {
     const results = [];
     const rows = document.querySelectorAll('tbody tr');
 
+    // NBA team nicknames for proper matching
+    const NBA_NICKNAMES = [
+      'Hawks', 'Celtics', 'Nets', 'Hornets', 'Bulls', 'Cavaliers',
+      'Mavericks', 'Nuggets', 'Pistons', 'Warriors', 'Rockets',
+      'Pacers', 'Clippers', 'Lakers', 'Grizzlies', 'Heat', 'Bucks',
+      'Timberwolves', 'Pelicans', 'Knicks', 'Thunder', 'Magic',
+      '76ers', 'Suns', 'Blazers', 'Kings', 'Spurs', 'Raptors',
+      'Jazz', 'Wizards'
+    ];
+
+    // Helper to find NBA nickname from text
+    const findNickname = (text) => {
+      if (!text) return null;
+      for (const nick of NBA_NICKNAMES) {
+        if (text.includes(nick)) return nick;
+      }
+      return null;
+    };
+
     rows.forEach((row, index) => {
       try {
         const text = row.textContent || '';
 
         // Extract team names from game-info elements
-        const teamElements = row.querySelectorAll('.game-info__team--desktop span, .game-info__team-info span');
+        const teamElements = row.querySelectorAll('.game-info__team--desktop span, .game-info__team-info span, [class*="team"] span');
         const teamNames = [];
+
         teamElements.forEach(el => {
-          const name = el.textContent?.trim();
-          if (name && name.length > 2 && name.length < 25 && /^[A-Za-z0-9\s]+$/.test(name)) {
-            if (!teamNames.includes(name)) {
-              teamNames.push(name);
-            }
+          const cellText = el.textContent?.trim();
+          if (!cellText) return;
+
+          // Try to find an NBA nickname in this element
+          const nickname = findNickname(cellText);
+          if (nickname && !teamNames.includes(nickname)) {
+            teamNames.push(nickname);
           }
         });
+
+        // Fallback: search the whole row text for team names
+        if (teamNames.length < 2) {
+          for (const nick of NBA_NICKNAMES) {
+            if (text.includes(nick) && !teamNames.includes(nick)) {
+              teamNames.push(nick);
+              if (teamNames.length >= 2) break;
+            }
+          }
+        }
 
         // Need at least 2 teams
         if (teamNames.length < 2) return;
