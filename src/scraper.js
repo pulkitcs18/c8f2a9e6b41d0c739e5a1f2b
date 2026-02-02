@@ -13,133 +13,140 @@ if (!EMAIL || !PASSWORD) {
 async function selectMarketType(page, marketType, sport = 'nba') {
   console.log(`\n🖱️  Selecting "${marketType}" from dropdown...`);
 
-  // APPROACH 1: Try direct URL navigation (most reliable)
-  const marketParam = marketType.toLowerCase();
-  const directUrl = `https://www.actionnetwork.com/${sport}/public-betting?market=${marketParam}`;
-  console.log(`  Trying direct URL: ${directUrl}`);
-
-  try {
-    await page.goto(directUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 30000,
-    });
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Check if rows exist (URL navigation worked)
-    const rowCount = await page.evaluate(() => document.querySelectorAll('tbody tr').length);
-    if (rowCount > 0) {
-      console.log(`  ✅ URL navigation successful (${rowCount} rows found)`);
-      return true;
+  // First, find what's currently showing in the dropdown
+  const currentDropdown = await page.evaluate(() => {
+    // Look for the select/dropdown container near the top
+    const selects = document.querySelectorAll('[class*="select"], [class*="Select"], [class*="dropdown"]');
+    for (const sel of selects) {
+      const rect = sel.getBoundingClientRect();
+      const text = sel.textContent?.trim();
+      if (rect.top > 80 && rect.top < 200 && rect.width > 80 && rect.width < 300) {
+        // Check if this contains a market type
+        if (text?.includes('Spread') || text?.includes('Total') || text?.includes('Moneyline') || text?.includes('All Markets')) {
+          return { text: text.split('\n')[0]?.trim() || text, top: rect.top, left: rect.left, width: rect.width };
+        }
+      }
     }
-    console.log('  URL navigation may not have worked (0 rows)');
+    return null;
+  });
+
+  console.log('  Current dropdown found:', currentDropdown ? `"${currentDropdown.text}" at (${currentDropdown.top}, ${currentDropdown.left})` : 'NOT FOUND');
+
+  // Method 1: Try using Puppeteer's text-based click (most reliable)
+  let clicked = false;
+  try {
+    // Click the dropdown trigger - look for text matching current market
+    await page.click(`text/Spread`, { timeout: 3000 }).catch(() => { });
+    clicked = true;
+    console.log('  ✅ Clicked dropdown using text selector');
   } catch (e) {
-    console.log(`  URL navigation failed: ${e.message}`);
+    console.log('  Text selector failed, trying coordinate click...');
   }
 
-  // APPROACH 2: Debug and click dropdown
-  console.log('  Trying dropdown click method...');
+  // Method 2: Use coordinate-based clicking
+  if (!clicked && currentDropdown) {
+    const x = currentDropdown.left + currentDropdown.width / 2;
+    const y = currentDropdown.top + 20;
+    console.log(`  Clicking at coordinates (${Math.round(x)}, ${Math.round(y)})`);
+    await page.mouse.click(x, y);
+    clicked = true;
+  }
 
-  // Debug: Log all elements that could be dropdowns
-  const debugElements = await page.evaluate(() => {
-    const results = [];
-    const marketTexts = ['Spread', 'Total', 'Moneyline', 'All Markets'];
+  // Method 3: Click at known position (based on typical layout: dropdown is ~410px from left, ~127px from top)
+  if (!clicked) {
+    console.log('  Trying known position click (410, 127)');
+    await page.mouse.click(410, 127);
+    clicked = true;
+  }
+
+  // Wait for dropdown menu to appear
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Debug: Check what options are visible
+  const menuOptions = await page.evaluate(() => {
+    const options = [];
+    const markets = ['Spread', 'Total', 'Moneyline', 'All Markets'];
 
     document.querySelectorAll('*').forEach(el => {
       const text = el.textContent?.trim();
       const rect = el.getBoundingClientRect();
 
-      if (text && marketTexts.includes(text) && rect.width > 0 && rect.height > 0 && rect.top < 300) {
-        results.push({
+      if (markets.includes(text) && rect.width > 0 && rect.height > 0 && rect.top > 100) {
+        options.push({
           text,
-          tag: el.tagName.toLowerCase(),
-          class: (el.className || '').substring(0, 40),
+          tag: el.tagName,
           top: Math.round(rect.top),
-          left: Math.round(rect.left),
-          w: Math.round(rect.width),
-          h: Math.round(rect.height),
+          clickable: el.tagName === 'DIV' || el.tagName === 'BUTTON' || el.tagName === 'A' || el.tagName === 'SPAN',
         });
       }
     });
 
-    return results.slice(0, 10); // Limit to first 10
+    // Sort by top position (menu items should be below the trigger)
+    return options.sort((a, b) => a.top - b.top);
   });
 
-  console.log('  📊 Dropdown candidates:', debugElements.length);
-  debugElements.forEach((el, i) => {
-    console.log(`    ${i}: "${el.text}" <${el.tag}> top=${el.top} size=${el.w}x${el.h} class=${el.class}`);
-  });
+  console.log('  📊 Menu options visible:', menuOptions.length);
+  menuOptions.forEach(opt => console.log(`    "${opt.text}" <${opt.tag}> top=${opt.top}`));
 
-  // Try to click the dropdown - expand search criteria
-  const dropdownClicked = await page.evaluate(() => {
-    const marketTexts = ['Spread', 'Total', 'Moneyline', 'All Markets'];
-    const allElements = Array.from(document.querySelectorAll('*'));
+  // Click the target market type
+  if (menuOptions.length > 0) {
+    // Find the target market in the visible options
+    const targetOption = menuOptions.find(opt => opt.text === marketType);
 
-    // Find candidates sorted by size (smaller = more specific)
-    const candidates = allElements
-      .filter(el => {
-        const text = el.textContent?.trim();
-        const rect = el.getBoundingClientRect();
-        return marketTexts.includes(text) &&
-          rect.width > 40 && rect.width < 400 &&
-          rect.height > 15 && rect.height < 80 &&
-          rect.top > 50 && rect.top < 300;
-      })
-      .sort((a, b) => {
-        const areaA = a.getBoundingClientRect().width * a.getBoundingClientRect().height;
-        const areaB = b.getBoundingClientRect().width * b.getBoundingClientRect().height;
-        return areaA - areaB;
-      });
-
-    if (candidates.length > 0) {
-      const target = candidates[0];
-      console.log('Clicking:', target.tagName, target.textContent?.trim());
-      target.click();
-      return target.textContent?.trim();
-    }
-    return null;
-  });
-
-  if (dropdownClicked) {
-    console.log(`  ✅ Clicked dropdown (was showing: ${dropdownClicked})`);
-
-    // Wait for menu to appear
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Click target market type
-    const selected = await page.evaluate((targetMarket) => {
-      const allElements = Array.from(document.querySelectorAll('*'));
-
-      const candidates = allElements
-        .filter(el => {
+    if (targetOption) {
+      // Click on it
+      const clicked = await page.evaluate((target) => {
+        const elements = Array.from(document.querySelectorAll('*'));
+        for (const el of elements) {
           const text = el.textContent?.trim();
           const rect = el.getBoundingClientRect();
-          return text === targetMarket && rect.width > 0 && rect.height > 0 && rect.width < 250;
-        })
-        .sort((a, b) => {
-          const areaA = a.getBoundingClientRect().width * a.getBoundingClientRect().height;
-          const areaB = b.getBoundingClientRect().width * b.getBoundingClientRect().height;
-          return areaA - areaB;
-        });
 
-      if (candidates.length > 0) {
-        candidates[0].click();
+          if (text === target && Math.round(rect.top) === targetOption.top) {
+            el.click();
+            return true;
+          }
+        }
+
+        // Fallback: click any element with exact text match
+        for (const el of elements) {
+          const text = el.textContent?.trim();
+          if (text === target) {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      }, marketType);
+
+      if (clicked) {
+        console.log(`  ✅ Selected "${marketType}"`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
         return true;
       }
-      return false;
-    }, marketType);
-
-    if (selected) {
-      console.log(`  ✅ Selected "${marketType}"`);
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      return true;
     } else {
-      console.log(`  ⚠️  Could not find "${marketType}" menu item`);
-      await page.mouse.click(100, 100); // Close menu
+      console.log(`  ⚠️  "${marketType}" not found in menu options`);
     }
-  } else {
-    console.log('  ⚠️  Could not find dropdown trigger');
   }
 
+  // Fallback: Try clicking by position in menu (Spread=1, Total=2, Moneyline=3, All Markets=4)
+  const menuPositions = { 'Spread': 0, 'Total': 1, 'Moneyline': 2, 'All Markets': 3 };
+  const position = menuPositions[marketType] || 0;
+
+  if (menuOptions.length === 0) {
+    // Menu didn't open, try keyboard navigation
+    console.log('  Trying keyboard navigation...');
+    for (let i = 0; i <= position; i++) {
+      await page.keyboard.press('ArrowDown');
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    await page.keyboard.press('Enter');
+    console.log(`  ✅ Used keyboard to select position ${position} (${marketType})`);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    return true;
+  }
+
+  // Click to close menu if selection failed
+  await page.mouse.click(50, 50);
   return false;
 }
 
