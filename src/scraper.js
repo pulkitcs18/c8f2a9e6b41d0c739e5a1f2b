@@ -33,19 +33,6 @@ export async function scrapeActionNetwork(sport = 'nba') {
 
     const page = await browser.newPage();
     
-    // Enable request/response logging
-    page.on('request', request => {
-      console.log(`📤 Request: ${request.method()} ${request.url().substring(0, 100)}`);
-    });
-    
-    page.on('response', response => {
-      console.log(`📥 Response: ${response.status()} ${response.url().substring(0, 100)}`);
-    });
-    
-    page.on('console', msg => {
-      console.log(`🖥️  Page Console: ${msg.text()}`);
-    });
-    
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -53,45 +40,20 @@ export async function scrapeActionNetwork(sport = 'nba') {
     console.log('✅ Page configured');
 
     console.log('🔐 Navigating to login page...');
-    console.log('⏱️  Timeout set to 5 minutes (300 seconds)');
     
-    // Try to navigate with 5 minute timeout
-    const startTime = Date.now();
-    try {
-      await page.goto('https://www.actionnetwork.com/login', {
-        waitUntil: 'domcontentloaded',
-        timeout: 300000, // 5 minutes
-      });
-      const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`✅ Login page loaded in ${loadTime} seconds`);
-    } catch (navError) {
-      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.error(`❌ Navigation failed after ${elapsedTime} seconds`);
-      
-      // Try to get current page content for debugging
-      const currentUrl = page.url();
-      const pageTitle = await page.title().catch(() => 'Unable to get title');
-      console.log(`📍 Current URL: ${currentUrl}`);
-      console.log(`📄 Page Title: ${pageTitle}`);
-      
-      // Take a screenshot if possible
-      try {
-        await page.screenshot({ path: '/tmp/login-timeout.png' });
-        console.log('📸 Screenshot saved to /tmp/login-timeout.png');
-      } catch (e) {
-        console.log('⚠️  Could not take screenshot');
-      }
-      
-      throw navError;
-    }
+    await page.goto('https://www.actionnetwork.com/login', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+    console.log('✅ Login page loaded');
 
-    // Check if we actually got to login page
+    // Check current URL and title
     const currentUrl = page.url();
     const pageTitle = await page.title();
     console.log(`📍 Current URL: ${currentUrl}`);
     console.log(`📄 Page Title: ${pageTitle}`);
 
-    // Wait for login form with increased timeout
+    // Wait for login form
     console.log('🔍 Looking for email input field...');
     await page.waitForSelector('input[type="email"], input[name="email"]', { 
       timeout: 30000
@@ -115,15 +77,42 @@ export async function scrapeActionNetwork(sport = 'nba') {
     console.log('⏱️  Waiting 1 second before clicking login...');
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Click login button
+    // Click login button - DON'T wait for navigation (Action Network uses SPA)
     console.log('🖱️  Clicking login button...');
-    await Promise.all([
-      page.waitForNavigation({ 
-        waitUntil: 'domcontentloaded',
-        timeout: 120000 // 2 minutes
-      }),
-      page.click('button[type="submit"]'),
-    ]);
+    await page.click('button[type="submit"]');
+    console.log('✅ Login button clicked');
+
+    // Wait for URL to change (indicates successful login)
+    console.log('⏱️  Waiting for login to complete (URL change)...');
+    try {
+      await page.waitForFunction(
+        () => !window.location.href.includes('/login'),
+        { timeout: 30000 }
+      );
+      console.log('✅ URL changed - login successful');
+    } catch (e) {
+      console.log('⚠️  URL did not change in 30 seconds, checking current state...');
+      const currentUrl = page.url();
+      console.log(`📍 Current URL: ${currentUrl}`);
+      
+      if (!currentUrl.includes('/login')) {
+        console.log('✅ Already logged in or redirected');
+      } else {
+        // Take screenshot for debugging
+        try {
+          await page.screenshot({ path: '/tmp/login-failed.png' });
+          console.log('📸 Screenshot saved to /tmp/login-failed.png');
+        } catch (screenshotErr) {
+          console.log('⚠️  Could not save screenshot');
+        }
+        
+        // Get page content for debugging
+        const bodyText = await page.evaluate(() => document.body.innerText);
+        console.log('📄 Page content snippet:', bodyText.substring(0, 500));
+        
+        throw new Error('Login failed - still on login page after 30 seconds');
+      }
+    }
 
     console.log('✅ Logged in successfully');
     
@@ -138,11 +127,11 @@ export async function scrapeActionNetwork(sport = 'nba') {
     console.log('📊 Navigating to public betting page...');
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: 120000, // 2 minutes
+      timeout: 60000,
     });
     console.log('✅ Public betting page loaded');
 
-    // Wait for data
+    // Wait for data to load
     console.log('⏱️  Waiting 5 seconds for data to load...');
     await new Promise(resolve => setTimeout(resolve, 5000));
 
@@ -259,11 +248,12 @@ export async function scrapeActionNetwork(sport = 'nba') {
     if (games.length > 0) {
       console.log('📄 Sample game:', JSON.stringify(games[0], null, 2));
     } else {
-      console.log('⚠️  No games extracted - page might not have loaded correctly');
+      console.log('⚠️  No games extracted - checking page content...');
       
       // Get page HTML for debugging
       const bodyHTML = await page.evaluate(() => document.body.innerHTML);
-      console.log('📄 Page HTML snippet:', bodyHTML.substring(0, 500));
+      console.log('📄 Page HTML snippet (first 500 chars):', bodyHTML.substring(0, 500));
+      console.log('📄 Page HTML snippet (last 500 chars):', bodyHTML.substring(bodyHTML.length - 500));
     }
 
     await browser.close();
