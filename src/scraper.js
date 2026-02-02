@@ -9,6 +9,29 @@ if (!EMAIL || !PASSWORD) {
   process.exit(1);
 }
 
+// Helper function to select a league from the dropdown
+async function selectLeague(page, sport) {
+  const sportUpper = sport.toUpperCase();
+  console.log(`\n🏆 Selecting sport: ${sportUpper}...`);
+
+  try {
+    const selector = '[data-testid="odds-tools-sub-nav__league-dropdown"] select';
+    await page.waitForSelector(selector, { timeout: 10000 });
+
+    // Select by value (nba, nfl, nhl, etc.)
+    await page.select(selector, sport.toLowerCase());
+    console.log(`  ✅ Selected ${sportUpper}`);
+
+    // Wait for page to reload data
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    return true;
+  } catch (error) {
+    console.log(`  ⚠️  Warning: Could not select sport ${sportUpper} via dropdown: ${error.message}`);
+    console.log(`  Continuing with current page...`);
+    return false;
+  }
+}
+
 // Helper function to select a market type using the native HTML <select> element
 // Based on HTML structure: <select> with options: spread, total, ml, combined
 async function selectMarketType(page, marketType, sport = 'nba') {
@@ -107,27 +130,47 @@ async function selectMarketType(page, marketType, sport = 'nba') {
 }
 
 // Helper function to extract data for current market type
-async function extractMarketData(page, marketType) {
-  console.log(`📥 Extracting ${marketType} data...`);
+async function extractMarketData(page, marketType, sport = 'nba') {
+  console.log(`📥 Extracting ${marketType} data for ${sport.toUpperCase()}...`);
 
-  const data = await page.evaluate((market) => {
+  const data = await page.evaluate((market, sportType) => {
     const results = [];
     const rows = document.querySelectorAll('tbody tr');
 
-    // NBA team nicknames for proper matching
-    const NBA_NICKNAMES = [
-      'Hawks', 'Celtics', 'Nets', 'Hornets', 'Bulls', 'Cavaliers',
-      'Mavericks', 'Nuggets', 'Pistons', 'Warriors', 'Rockets',
-      'Pacers', 'Clippers', 'Lakers', 'Grizzlies', 'Heat', 'Bucks',
-      'Timberwolves', 'Pelicans', 'Knicks', 'Thunder', 'Magic',
-      '76ers', 'Suns', 'Blazers', 'Kings', 'Spurs', 'Raptors',
-      'Jazz', 'Wizards'
-    ];
+    // Sport-specific nicknames for proper matching
+    const SPORT_NICKNAMES = {
+      'NBA': [
+        'Hawks', 'Celtics', 'Nets', 'Hornets', 'Bulls', 'Cavaliers',
+        'Mavericks', 'Nuggets', 'Pistons', 'Warriors', 'Rockets',
+        'Pacers', 'Clippers', 'Lakers', 'Grizzlies', 'Heat', 'Bucks',
+        'Timberwolves', 'Pelicans', 'Knicks', 'Thunder', 'Magic',
+        '76ers', 'Suns', 'Blazers', 'Kings', 'Spurs', 'Raptors',
+        'Jazz', 'Wizards'
+      ],
+      'NFL': [
+        'Cardinals', 'Falcons', 'Ravens', 'Bills', 'Panthers', 'Bears',
+        'Bengals', 'Browns', 'Cowboys', 'Broncos', 'Lions', 'Packers',
+        'Texans', 'Colts', 'Jaguars', 'Chiefs', 'Raiders', 'Chargers',
+        'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants',
+        'Jets', 'Eagles', 'Steelers', '49ers', 'Seahawks', 'Buccaneers',
+        'Titans', 'Commanders'
+      ],
+      'NHL': [
+        'Ducks', 'Bruins', 'Sabres', 'Flames', 'Hurricanes', 'Blackhawks',
+        'Avalanche', 'Blue Jackets', 'Stars', 'Red Wings', 'Oilers',
+        'Panthers', 'Kings', 'Wild', 'Canadiens', 'Predators', 'Devils',
+        'Islanders', 'Rangers', 'Senators', 'Flyers', 'Penguins', 'Sharks',
+        'Kraken', 'Blues', 'Lightning', 'Maple Leafs', 'Canucks',
+        'Golden Knights', 'Capitals', 'Jets', 'Utah'
+      ]
+    };
 
-    // Helper to find NBA nickname from text
+    const nicknames = SPORT_NICKNAMES[sportType.toUpperCase()] || SPORT_NICKNAMES['NBA'];
+
+    // Helper to find nickname from text
     const findNickname = (text) => {
       if (!text) return null;
-      for (const nick of NBA_NICKNAMES) {
+      for (const nick of nicknames) {
         if (text.includes(nick)) return nick;
       }
       return null;
@@ -228,7 +271,7 @@ async function extractMarketData(page, marketType) {
     });
 
     return results;
-  }, marketType);
+  }, marketType, sport);
 
   console.log(`  Extracted ${data.length} rows for ${marketType}`);
   return data;
@@ -335,7 +378,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Public betting page loaded');
 
-    // Wait for page to fully render
+    // Choose the sport from dropdown as requested
+    await selectLeague(page, sport);
+
+    // Wait for page to fully render after possible reload
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Verify we're on the right page with data
@@ -363,13 +409,13 @@ export async function scrapeActionNetwork(sport = 'nba') {
 
     // 1. Scrape SPREAD (default - already loaded)
     console.log('\n====== SCRAPING SPREAD DATA ======');
-    const spreadData = await extractMarketData(page, 'Spread');
+    const spreadData = await extractMarketData(page, 'Spread', sport);
 
     for (const row of spreadData) {
       const gameKey = `${row.awayTeam}_${row.homeTeam}`;
       if (!gameDataMap.has(gameKey)) {
         gameDataMap.set(gameKey, {
-          game_id: `${row.awayTeam.replace(/\s+/g, '_')}_${row.homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
+          game_id: `${sport.toLowerCase()}_${row.awayTeam.replace(/\s+/g, '_')}_${row.homeTeam.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
           sport: sport.toUpperCase(),
           scheduled_time: new Date().toISOString(),
           home_team: row.homeTeam,
@@ -408,7 +454,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
     const totalSelected = await selectMarketType(page, 'Total', sport);
 
     if (totalSelected) {
-      const totalData = await extractMarketData(page, 'Total');
+      const totalData = await extractMarketData(page, 'Total', sport);
 
       for (const row of totalData) {
         const gameKey = `${row.awayTeam}_${row.homeTeam}`;
@@ -434,7 +480,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
     const mlSelected = await selectMarketType(page, 'Moneyline', sport);
 
     if (mlSelected) {
-      const mlData = await extractMarketData(page, 'Moneyline');
+      const mlData = await extractMarketData(page, 'Moneyline', sport);
 
       for (const row of mlData) {
         const gameKey = `${row.awayTeam}_${row.homeTeam}`;
