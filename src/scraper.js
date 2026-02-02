@@ -9,145 +9,101 @@ if (!EMAIL || !PASSWORD) {
   process.exit(1);
 }
 
-// Helper function to click dropdown and select a market type
+// Helper function to select a market type using the native HTML <select> element
+// Based on HTML structure: <select> with options: spread, total, ml, combined
 async function selectMarketType(page, marketType, sport = 'nba') {
-  console.log(`\n🖱️  Selecting "${marketType}" from dropdown...`);
+  console.log(`\n� Selecting "${marketType}" from dropdown...`);
 
-  // First, find what's currently showing in the dropdown
-  const currentDropdown = await page.evaluate(() => {
-    // Look for the select/dropdown container near the top
-    const selects = document.querySelectorAll('[class*="select"], [class*="Select"], [class*="dropdown"]');
-    for (const sel of selects) {
-      const rect = sel.getBoundingClientRect();
-      const text = sel.textContent?.trim();
-      if (rect.top > 80 && rect.top < 200 && rect.width > 80 && rect.width < 300) {
-        // Check if this contains a market type
-        if (text?.includes('Spread') || text?.includes('Total') || text?.includes('Moneyline') || text?.includes('All Markets')) {
-          return { text: text.split('\n')[0]?.trim() || text, top: rect.top, left: rect.left, width: rect.width };
+  // Map market type names to option values from the HTML
+  const marketValues = {
+    'Spread': 'spread',
+    'Total': 'total',
+    'Moneyline': 'ml',
+    'All Markets': 'combined'
+  };
+
+  const optionValue = marketValues[marketType];
+  if (!optionValue) {
+    console.log(`  ⚠️  Unknown market type: ${marketType}`);
+    return false;
+  }
+
+  console.log(`  Using value: "${optionValue}"`);
+
+  // Find and select from the native <select> element
+  // The select is inside div[data-testid="odds-tools-sub-nav__odds-type"]
+  try {
+    // Try multiple selectors to find the select element
+    const selectors = [
+      '[data-testid="odds-tools-sub-nav__odds-type"] select',
+      '.odds-tools-sub-nav__odds-type select',
+      'select[name=""]',
+      'select',
+    ];
+
+    let selected = false;
+    for (const selector of selectors) {
+      try {
+        // Check if selector exists
+        const exists = await page.$(selector);
+        if (exists) {
+          console.log(`  Found select element with selector: ${selector}`);
+
+          // Use page.select() to change the value
+          await page.select(selector, optionValue);
+          console.log(`  ✅ Selected "${marketType}" (value: ${optionValue})`);
+          selected = true;
+          break;
         }
+      } catch (e) {
+        // Try next selector
       }
     }
-    return null;
-  });
 
-  console.log('  Current dropdown found:', currentDropdown ? `"${currentDropdown.text}" at (${currentDropdown.top}, ${currentDropdown.left})` : 'NOT FOUND');
-
-  // Method 1: Try using Puppeteer's text-based click (most reliable)
-  let clicked = false;
-  try {
-    // Click the dropdown trigger - look for text matching current market
-    await page.click(`text/Spread`, { timeout: 3000 }).catch(() => { });
-    clicked = true;
-    console.log('  ✅ Clicked dropdown using text selector');
-  } catch (e) {
-    console.log('  Text selector failed, trying coordinate click...');
-  }
-
-  // Method 2: Use coordinate-based clicking
-  if (!clicked && currentDropdown) {
-    const x = currentDropdown.left + currentDropdown.width / 2;
-    const y = currentDropdown.top + 20;
-    console.log(`  Clicking at coordinates (${Math.round(x)}, ${Math.round(y)})`);
-    await page.mouse.click(x, y);
-    clicked = true;
-  }
-
-  // Method 3: Click at known position (based on typical layout: dropdown is ~410px from left, ~127px from top)
-  if (!clicked) {
-    console.log('  Trying known position click (410, 127)');
-    await page.mouse.click(410, 127);
-    clicked = true;
-  }
-
-  // Wait for dropdown menu to appear
-  await new Promise(resolve => setTimeout(resolve, 2000));
-
-  // Debug: Check what options are visible
-  const menuOptions = await page.evaluate(() => {
-    const options = [];
-    const markets = ['Spread', 'Total', 'Moneyline', 'All Markets'];
-
-    document.querySelectorAll('*').forEach(el => {
-      const text = el.textContent?.trim();
-      const rect = el.getBoundingClientRect();
-
-      if (markets.includes(text) && rect.width > 0 && rect.height > 0 && rect.top > 100) {
-        options.push({
-          text,
-          tag: el.tagName,
-          top: Math.round(rect.top),
-          clickable: el.tagName === 'DIV' || el.tagName === 'BUTTON' || el.tagName === 'A' || el.tagName === 'SPAN',
-        });
-      }
-    });
-
-    // Sort by top position (menu items should be below the trigger)
-    return options.sort((a, b) => a.top - b.top);
-  });
-
-  console.log('  📊 Menu options visible:', menuOptions.length);
-  menuOptions.forEach(opt => console.log(`    "${opt.text}" <${opt.tag}> top=${opt.top}`));
-
-  // Click the target market type
-  if (menuOptions.length > 0) {
-    // Find the target market in the visible options
-    const targetOption = menuOptions.find(opt => opt.text === marketType);
-
-    if (targetOption) {
-      // Click on it
-      const clicked = await page.evaluate((target) => {
-        const elements = Array.from(document.querySelectorAll('*'));
-        for (const el of elements) {
-          const text = el.textContent?.trim();
-          const rect = el.getBoundingClientRect();
-
-          if (text === target && Math.round(rect.top) === targetOption.top) {
-            el.click();
-            return true;
-          }
-        }
-
-        // Fallback: click any element with exact text match
-        for (const el of elements) {
-          const text = el.textContent?.trim();
-          if (text === target) {
-            el.click();
+    if (!selected) {
+      // Fallback: Try using evaluate to directly set the select value
+      console.log('  Trying direct DOM manipulation...');
+      await page.evaluate((value) => {
+        const selectElements = document.querySelectorAll('select');
+        for (const sel of selectElements) {
+          // Check if this select has our options
+          const options = Array.from(sel.options).map(o => o.value);
+          if (options.includes('spread') && options.includes('total') && options.includes('ml')) {
+            sel.value = value;
+            // Trigger change event
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            console.log('Set select value to:', value);
             return true;
           }
         }
         return false;
-      }, marketType);
-
-      if (clicked) {
-        console.log(`  ✅ Selected "${marketType}"`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        return true;
-      }
-    } else {
-      console.log(`  ⚠️  "${marketType}" not found in menu options`);
+      }, optionValue);
+      console.log(`  ✅ Set value via DOM manipulation`);
+      selected = true;
     }
-  }
 
-  // Fallback: Try clicking by position in menu (Spread=1, Total=2, Moneyline=3, All Markets=4)
-  const menuPositions = { 'Spread': 0, 'Total': 1, 'Moneyline': 2, 'All Markets': 3 };
-  const position = menuPositions[marketType] || 0;
-
-  if (menuOptions.length === 0) {
-    // Menu didn't open, try keyboard navigation
-    console.log('  Trying keyboard navigation...');
-    for (let i = 0; i <= position; i++) {
-      await page.keyboard.press('ArrowDown');
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-    await page.keyboard.press('Enter');
-    console.log(`  ✅ Used keyboard to select position ${position} (${marketType})`);
+    // Wait for page to update with new data
     await new Promise(resolve => setTimeout(resolve, 3000));
-    return true;
-  }
 
-  // Click to close menu if selection failed
-  await page.mouse.click(50, 50);
-  return false;
+    // Verify the change
+    const currentValue = await page.evaluate(() => {
+      const selectElements = document.querySelectorAll('select');
+      for (const sel of selectElements) {
+        const options = Array.from(sel.options).map(o => o.value);
+        if (options.includes('spread') && options.includes('total') && options.includes('ml')) {
+          return sel.value;
+        }
+      }
+      return 'unknown';
+    });
+    console.log(`  📊 Current select value: "${currentValue}"`);
+
+    return currentValue === optionValue;
+
+  } catch (error) {
+    console.log(`  ❌ Error selecting market: ${error.message}`);
+    return false;
+  }
 }
 
 // Helper function to extract data for current market type
