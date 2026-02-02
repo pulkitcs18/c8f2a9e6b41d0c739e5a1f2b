@@ -99,63 +99,176 @@ export async function scrapeActionNetwork(sport = 'nba') {
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Click the "Spread" dropdown to change to "All Markets"
-    console.log('🖱️  Looking for market filter dropdown...');
+    console.log('🖱️  Looking for market filter dropdown (Spread button)...');
     
-    const dropdownSelectors = [
-      'select',
-      'button:has-text("Spread")',
-      '[data-testid*="market-filter"]',
-    ];
-
-    // Try to click the dropdown
+    // The dropdown is a custom button-based dropdown, NOT a native <select>
+    // It appears as a button showing "Spread" next to the sport selector
     let dropdownClicked = false;
-    for (const selector of dropdownSelectors) {
+    
+    // Method 1: Try to find the Spread button by looking for elements with "Spread" text
+    // that are part of a dropdown/select-like component
+    try {
+      dropdownClicked = await page.evaluate(() => {
+        // Look for all clickable elements that contain "Spread" text
+        const allElements = Array.from(document.querySelectorAll('button, div[role="button"], [class*="select"], [class*="dropdown"], [class*="filter"]'));
+        
+        for (const el of allElements) {
+          const text = el.textContent?.trim();
+          // Find element that shows "Spread" and looks like a dropdown trigger
+          if (text === 'Spread' || text?.toLowerCase() === 'spread') {
+            console.log('Found Spread dropdown button:', el.className);
+            el.click();
+            return true;
+          }
+        }
+        
+        // Also try looking for parent containers with dropdown classes
+        const dropdownTriggers = document.querySelectorAll('[class*="Dropdown"], [class*="Select"], [class*="trigger"]');
+        for (const trigger of dropdownTriggers) {
+          if (trigger.textContent?.includes('Spread')) {
+            console.log('Found dropdown trigger with Spread:', trigger.className);
+            trigger.click();
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      if (dropdownClicked) {
+        console.log('✅ Clicked Spread dropdown button');
+      }
+    } catch (e) {
+      console.log('⚠️  Method 1 failed:', e.message);
+    }
+    
+    // Method 2: If method 1 failed, try clicking any element that exactly matches "Spread"
+    if (!dropdownClicked) {
+      console.log('🔍 Trying alternative method to find Spread dropdown...');
       try {
-        await page.click(selector);
-        console.log(`✅ Clicked dropdown with selector: ${selector}`);
-        dropdownClicked = true;
-        break;
+        // Look for the dropdown by its position - it should be near the sport selector
+        dropdownClicked = await page.evaluate(() => {
+          // Find all elements and look for one that's a dropdown showing "Spread"
+          const walker = document.createTreeWalker(
+            document.body,
+            NodeFilter.SHOW_ELEMENT,
+            null,
+            false
+          );
+          
+          let node;
+          while (node = walker.nextNode()) {
+            const text = node.textContent?.trim();
+            const directText = Array.from(node.childNodes)
+              .filter(n => n.nodeType === Node.TEXT_NODE)
+              .map(n => n.textContent.trim())
+              .join('');
+            
+            // Look for elements where the direct text content is "Spread"
+            if (directText === 'Spread' || 
+                (node.tagName === 'BUTTON' && text === 'Spread') ||
+                (node.getAttribute('role') === 'button' && text === 'Spread')) {
+              console.log('Found Spread element:', node.tagName, node.className);
+              node.click();
+              return true;
+            }
+          }
+          
+          // Last resort: click by XPath-like approach
+          const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+          const spreadBtn = buttons.find(b => {
+            const rect = b.getBoundingClientRect();
+            // Button should be visible and have "Spread" in it
+            return rect.width > 0 && rect.height > 0 && 
+                   b.textContent?.trim().includes('Spread') &&
+                   !b.textContent?.includes('%'); // Exclude percentage displays
+          });
+          
+          if (spreadBtn) {
+            console.log('Found Spread button by visibility check:', spreadBtn.className);
+            spreadBtn.click();
+            return true;
+          }
+          
+          return false;
+        });
+        
+        if (dropdownClicked) {
+          console.log('✅ Clicked Spread dropdown via alternative method');
+        }
       } catch (e) {
-        // Try next selector
+        console.log('⚠️  Method 2 failed:', e.message);
       }
     }
-
+    
+    // Method 3: Use page.click with XPath or specific selectors
     if (!dropdownClicked) {
-      // Try clicking by text
-      console.log('🔍 Trying to find dropdown by text...');
-      await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const dropdownButton = buttons.find(btn => 
-          btn.textContent?.trim().toLowerCase().includes('spread') ||
-          btn.textContent?.trim().toLowerCase().includes('total') ||
-          btn.textContent?.trim().toLowerCase().includes('moneyline')
-        );
-        if (dropdownButton) {
-          dropdownButton.click();
+      console.log('🔍 Trying direct CSS selectors for dropdown...');
+      const selectors = [
+        'button:has-text("Spread")',
+        '[data-testid*="market"]',
+        '[class*="market-select"]',
+        '[class*="MarketSelect"]',
+        '.public-betting button',
+      ];
+      
+      for (const selector of selectors) {
+        try {
+          await page.click(selector);
+          console.log(`✅ Clicked dropdown with selector: ${selector}`);
+          dropdownClicked = true;
+          break;
+        } catch (e) {
+          // Continue to next selector
         }
-      });
-      console.log('✅ Clicked dropdown via text search');
+      }
+    }
+    
+    if (!dropdownClicked) {
+      console.log('⚠️  Could not find Spread dropdown, trying to take screenshot for debugging...');
     }
 
     // Wait for dropdown menu to appear
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Click "All Markets" option
-    console.log('🖱️  Selecting "All Markets" option...');
-    await page.evaluate(() => {
-      const allElements = Array.from(document.querySelectorAll('button, div, span, li, option'));
-      const allMarketsOption = allElements.find(el => 
-        el.textContent?.trim().toLowerCase() === 'all markets'
-      );
-      if (allMarketsOption) {
-        allMarketsOption.click();
+    // Click "All Markets" option from the dropdown menu
+    console.log('🖱️  Looking for "All Markets" option in dropdown menu...');
+    const allMarketsClicked = await page.evaluate(() => {
+      // The dropdown menu should now be visible
+      // Look for the "All Markets" option
+      const allElements = Array.from(document.querySelectorAll('button, div, span, li, a, [role="option"], [role="menuitem"]'));
+      
+      for (const el of allElements) {
+        const text = el.textContent?.trim().toLowerCase();
+        if (text === 'all markets') {
+          console.log('Found All Markets option:', el.tagName, el.className);
+          el.click();
+          return true;
+        }
       }
+      
+      // Also check for elements with specific dropdown item classes
+      const dropdownItems = document.querySelectorAll('[class*="dropdown-item"], [class*="menu-item"], [class*="option"]');
+      for (const item of dropdownItems) {
+        if (item.textContent?.trim().toLowerCase() === 'all markets') {
+          console.log('Found All Markets in dropdown items:', item.className);
+          item.click();
+          return true;
+        }
+      }
+      
+      return false;
     });
-    console.log('✅ Selected "All Markets"');
+    
+    if (allMarketsClicked) {
+      console.log('✅ Selected "All Markets"');
+    } else {
+      console.log('⚠️  Could not find "All Markets" option - dropdown may not have opened');
+    }
 
-    // Wait for page to update with all markets
+    // Wait for page to update with all markets data
     await new Promise(resolve => setTimeout(resolve, 5000));
-    console.log('✅ Page updated with all markets');
+    console.log('✅ Page updated (waiting for all markets data)');
 
     // ==================== HTML STRUCTURE DEBUG ====================
     console.log('🔍 Starting HTML structure debug...');
