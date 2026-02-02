@@ -342,31 +342,19 @@ export async function scrapeActionNetwork(sport = 'nba') {
           scheduled_time: new Date().toISOString(),
           home_team: row.homeTeam,
           away_team: row.awayTeam,
-          // Spread data
+          // Spread data (NEW SCHEMA - only these fields)
           spread_line: null,
           spread_home_bets_pct: null,
           spread_home_money_pct: null,
-          spread_away_bets_pct: null,
-          spread_away_money_pct: null,
-          spread_diff: null,
-          spread_total_bets: null,
-          // Total data  
+          // Total data (NEW SCHEMA - only these fields)
           total_line: null,
           over_bets_pct: null,
           over_money_pct: null,
-          under_bets_pct: null,
-          under_money_pct: null,
-          total_diff: null,
-          total_bets: null,
-          // Moneyline data
+          // Moneyline data (NEW SCHEMA - only these fields)
           ml_home_odds: null,
           ml_away_odds: null,
           ml_home_bets_pct: null,
           ml_home_money_pct: null,
-          ml_away_bets_pct: null,
-          ml_away_money_pct: null,
-          ml_diff: null,
-          ml_total_bets: null,
         });
       }
 
@@ -378,12 +366,9 @@ export async function scrapeActionNetwork(sport = 'nba') {
           game.spread_line = parseFloat(spreadMatch[1]);
         }
       }
-      game.spread_away_bets_pct = row.awayBetsPct;
+      // Store home percentages (row shows away, so invert)
       game.spread_home_bets_pct = row.homeBetsPct;
-      game.spread_away_money_pct = row.awayMoneyPct;
       game.spread_home_money_pct = row.homeMoneyPct;
-      game.spread_diff = row.diff;
-      game.spread_total_bets = row.totalBets;
     }
 
     // 2. Scrape TOTAL
@@ -405,12 +390,9 @@ export async function scrapeActionNetwork(sport = 'nba') {
               game.total_line = parseFloat(totalMatch[1]);
             }
           }
+          // Store over percentages only (new schema)
           game.over_bets_pct = row.awayBetsPct;
-          game.under_bets_pct = row.homeBetsPct;
           game.over_money_pct = row.awayMoneyPct;
-          game.under_money_pct = row.homeMoneyPct;
-          game.total_diff = row.diff;
-          game.total_bets = row.totalBets;
         }
       }
     }
@@ -440,12 +422,9 @@ export async function scrapeActionNetwork(sport = 'nba') {
               game.ml_home_odds = parseInt(mlMatch[1]);
             }
           }
-          game.ml_away_bets_pct = row.awayBetsPct;
+          // Store home percentages for moneyline (new schema)
           game.ml_home_bets_pct = row.homeBetsPct;
-          game.ml_away_money_pct = row.awayMoneyPct;
           game.ml_home_money_pct = row.homeMoneyPct;
-          game.ml_diff = row.diff;
-          game.ml_total_bets = row.totalBets;
         }
       }
     }
