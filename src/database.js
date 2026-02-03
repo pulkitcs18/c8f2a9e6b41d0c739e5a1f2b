@@ -1,11 +1,11 @@
 // src/database.js - Updated to use Lovable API endpoint
 
 const LOVABLE_ENDPOINT = process.env.LOVABLE_API_ENDPOINT;
-const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 
-if (!LOVABLE_ENDPOINT || !LOVABLE_API_KEY) {
-  console.error('❌ Missing Lovable API credentials!');
-  console.error('Required: LOVABLE_API_ENDPOINT and LOVABLE_API_KEY');
+if (!LOVABLE_ENDPOINT || !SCRAPER_API_KEY) {
+  console.error('❌ Missing Scraper credentials!');
+  console.error('Required: LOVABLE_API_ENDPOINT and SCRAPER_API_KEY');
   process.exit(1);
 }
 
@@ -40,7 +40,7 @@ export async function savePublicBettingData(games) {
     const response = await fetch(LOVABLE_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${SCRAPER_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -76,7 +76,7 @@ export async function testConnection() {
     const response = await fetch(LOVABLE_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${SCRAPER_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
