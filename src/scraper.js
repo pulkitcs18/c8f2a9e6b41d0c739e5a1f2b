@@ -197,7 +197,7 @@ async function extractMarketData(page, marketType, sport = 'nba') {
 
         // Fallback: search the whole row text for team names
         if (teamNames.length < 2) {
-          for (const nick of NBA_NICKNAMES) {
+          for (const nick of nicknames) {
             if (text.includes(nick) && !teamNames.includes(nick)) {
               teamNames.push(nick);
               if (teamNames.length >= 2) break;
