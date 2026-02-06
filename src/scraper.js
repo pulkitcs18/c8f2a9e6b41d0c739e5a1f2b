@@ -477,6 +477,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
           // Store over percentages only (new schema)
           game.over_bets_pct = row.awayBetsPct;
           game.over_money_pct = row.awayMoneyPct;
+          // Capture total_bets if not already set from Spread
+          if (row.totalBets != null && game.total_bets == null) {
+            game.total_bets = row.totalBets;
+          }
         }
       }
     }
@@ -509,143 +513,66 @@ export async function scrapeActionNetwork(sport = 'nba') {
           // Store home percentages for moneyline (new schema)
           game.ml_home_bets_pct = row.homeBetsPct;
           game.ml_home_money_pct = row.homeMoneyPct;
-        }
-      }
-    }
-
-    // 4. Extract total bets count directly from the page
-    console.log('\n====== EXTRACTING BETS COUNT ======');
-    const betsDebug = await page.evaluate((sportType) => {
-      const SPORT_NICKNAMES = {
-        'NBA': [
-          'Hawks', 'Celtics', 'Nets', 'Hornets', 'Bulls', 'Cavaliers',
-          'Mavericks', 'Nuggets', 'Pistons', 'Warriors', 'Rockets',
-          'Pacers', 'Clippers', 'Lakers', 'Grizzlies', 'Heat', 'Bucks',
-          'Timberwolves', 'Pelicans', 'Knicks', 'Thunder', 'Magic',
-          '76ers', 'Suns', 'Blazers', 'Kings', 'Spurs', 'Raptors',
-          'Jazz', 'Wizards'
-        ],
-        'NFL': [
-          'Cardinals', 'Falcons', 'Ravens', 'Bills', 'Panthers', 'Bears',
-          'Bengals', 'Browns', 'Cowboys', 'Broncos', 'Lions', 'Packers',
-          'Texans', 'Colts', 'Jaguars', 'Chiefs', 'Raiders', 'Chargers',
-          'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants',
-          'Jets', 'Eagles', 'Steelers', '49ers', 'Seahawks', 'Buccaneers',
-          'Titans', 'Commanders'
-        ],
-        'NHL': [
-          'Ducks', 'Bruins', 'Sabres', 'Flames', 'Hurricanes', 'Blackhawks',
-          'Avalanche', 'Blue Jackets', 'Stars', 'Red Wings', 'Oilers',
-          'Panthers', 'Kings', 'Wild', 'Canadiens', 'Predators', 'Devils',
-          'Islanders', 'Rangers', 'Senators', 'Flyers', 'Penguins', 'Sharks',
-          'Kraken', 'Blues', 'Lightning', 'Maple Leafs', 'Canucks',
-          'Golden Knights', 'Capitals', 'Jets', 'Utah'
-        ]
-      };
-      const nicknames = SPORT_NICKNAMES[sportType.toUpperCase()] || SPORT_NICKNAMES['NBA'];
-
-      // DEBUG: Check what selectors find
-      const debug = {
-        // 1. Check for bets elements by exact class
-        exactClassCount: document.querySelectorAll('.public-betting__number-of-bets').length,
-        // 2. Check for bets elements by partial class match
-        partialClassCount: document.querySelectorAll('[class*="number-of-bets"]').length,
-        // 3. Check for ANY element containing "bets" in class name
-        anyBetsClass: document.querySelectorAll('[class*="bets"]').length,
-        // 4. Check the last <th> header text (should be "Bets" if column exists)
-        lastThText: (() => {
-          const ths = document.querySelectorAll('thead th');
-          return ths.length > 0 ? ths[ths.length - 1]?.textContent?.trim() : 'no thead found';
-        })(),
-        // 5. Get all th texts to see table columns
-        allThTexts: Array.from(document.querySelectorAll('thead th')).map(th => th.textContent?.trim()),
-        // 6. Check how many <tr> rows exist in tbody
-        tbodyRowCount: document.querySelectorAll('tbody tr').length,
-        // 7. For first <tr>, get all td classes and text snippets
-        firstRowInfo: (() => {
-          const firstRow = document.querySelector('tbody tr');
-          if (!firstRow) return 'no rows';
-          const tds = firstRow.querySelectorAll('td');
-          return Array.from(tds).map((td, i) => ({
-            index: i,
-            classes: td.className,
-            textSnippet: td.textContent?.trim().substring(0, 80),
-            childClasses: Array.from(td.querySelectorAll('*')).map(c => c.className).filter(Boolean).slice(0, 5),
-          }));
-        })(),
-        // 8. Search the entire page HTML for "number-of-bets" string
-        htmlContainsBetsClass: document.documentElement.innerHTML.includes('number-of-bets'),
-        // 9. Search for any element with text that looks like a bets count (4-6 digit number with comma)
-        betsLikeText: (() => {
-          const allText = document.body?.innerText || '';
-          const matches = allText.match(/\b\d{1,2},\d{3}\b/g);
-          return matches ? matches.slice(0, 10) : [];
-        })(),
-      };
-
-      // Now try extraction
-      const results = [];
-      const betsElements = document.querySelectorAll('.public-betting__number-of-bets, [class*="number-of-bets"]');
-
-      betsElements.forEach(el => {
-        const betsMatch = el.textContent?.match(/([\d,]+)/);
-        if (!betsMatch) return;
-        const betsCount = parseInt(betsMatch[1].replace(/,/g, ''));
-        if (isNaN(betsCount) || betsCount === 0) return;
-
-        const row = el.closest('tr');
-        const rowText = row ? (row.textContent || '') : '';
-        const teamsFound = [];
-        for (const nick of nicknames) {
-          if (rowText.includes(nick) && !teamsFound.includes(nick)) {
-            teamsFound.push(nick);
-            if (teamsFound.length >= 2) break;
+          // Capture total_bets if not already set from Spread/Total
+          if (row.totalBets != null && game.total_bets == null) {
+            game.total_bets = row.totalBets;
           }
         }
-
-        results.push({
-          awayTeam: teamsFound[0] || null,
-          homeTeam: teamsFound[1] || null,
-          bets: betsCount,
-          hasParentTr: !!row,
-          teamsFoundCount: teamsFound.length,
-          elClass: el.className,
-          elTag: el.tagName,
-          parentTag: el.parentElement?.tagName,
-          parentClass: el.parentElement?.className,
-        });
-      });
-
-      return { debug, results };
-    }, sport);
-
-    // Log all debug info
-    console.log('  DEBUG info:');
-    console.log(`    exactClassCount (.public-betting__number-of-bets): ${betsDebug.debug.exactClassCount}`);
-    console.log(`    partialClassCount ([class*="number-of-bets"]): ${betsDebug.debug.partialClassCount}`);
-    console.log(`    anyBetsClass ([class*="bets"]): ${betsDebug.debug.anyBetsClass}`);
-    console.log(`    lastThText: "${betsDebug.debug.lastThText}"`);
-    console.log(`    allThTexts: ${JSON.stringify(betsDebug.debug.allThTexts)}`);
-    console.log(`    tbodyRowCount: ${betsDebug.debug.tbodyRowCount}`);
-    console.log(`    htmlContainsBetsClass: ${betsDebug.debug.htmlContainsBetsClass}`);
-    console.log(`    betsLikeText (comma numbers on page): ${JSON.stringify(betsDebug.debug.betsLikeText)}`);
-    console.log(`    firstRowInfo: ${JSON.stringify(betsDebug.debug.firstRowInfo, null, 2)}`);
-
-    console.log(`  Found ${betsDebug.results.length} bets elements:`);
-    for (const r of betsDebug.results) {
-      console.log(`    bets=${r.bets}, teams=[${r.awayTeam}, ${r.homeTeam}], tag=${r.elTag}, class="${r.elClass}", parentTag=${r.parentTag}, parentClass="${r.parentClass}", hasTr=${r.hasParentTr}, teamsFound=${r.teamsFoundCount}`);
-    }
-
-    // Map bets back to games (only entries with 2 teams)
-    for (const entry of betsDebug.results) {
-      if (!entry.awayTeam || !entry.homeTeam) continue;
-      const gameKey = `${entry.awayTeam}_${entry.homeTeam}`;
-      const game = gameDataMap.get(gameKey);
-      if (game && entry.bets) {
-        game.total_bets = entry.bets;
-        console.log(`  ✅ ${entry.awayTeam} @ ${entry.homeTeam}: ${entry.bets.toLocaleString()} bets`);
       }
     }
+
+    // 4. Extract total bets count by row position
+    // Use row index mapping from spreadData to avoid team-name matching bugs
+    // (the old approach matched teams by nickname array order, not DOM order,
+    //  causing away/home swaps and key mismatches for ~half the games)
+    console.log('\n====== EXTRACTING BETS COUNT ======');
+
+    // Build row index → game key mapping from spread extraction
+    const rowToGameKey = new Map();
+    for (const row of spreadData) {
+      rowToGameKey.set(row.rowIndex, `${row.awayTeam}_${row.homeTeam}`);
+    }
+
+    // Scroll to bottom to ensure all bets elements are rendered
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    const betsData = await page.evaluate(() => {
+      const results = [];
+      const rows = document.querySelectorAll('tbody tr');
+      rows.forEach((row, index) => {
+        const betsEl = row.querySelector('.public-betting__number-of-bets, [class*="number-of-bets"]');
+        let bets = null;
+        if (betsEl) {
+          const match = betsEl.textContent?.match(/([\d,]+)/);
+          if (match) {
+            bets = parseInt(match[1].replace(/,/g, ''));
+            if (isNaN(bets)) bets = null;
+          }
+        }
+        results.push({ index, bets });
+      });
+      return results;
+    });
+
+    console.log(`  Found ${betsData.length} rows, bets values: ${JSON.stringify(betsData.map(r => r.bets))}`);
+
+    let betsUpdated = 0;
+    for (const entry of betsData) {
+      if (entry.bets == null) continue;
+      const gameKey = rowToGameKey.get(entry.index);
+      if (!gameKey) {
+        console.log(`  ⚠️ Row ${entry.index}: ${entry.bets} bets but no game mapping`);
+        continue;
+      }
+      const game = gameDataMap.get(gameKey);
+      if (game) {
+        game.total_bets = entry.bets;
+        betsUpdated++;
+        console.log(`  ✅ ${gameKey}: ${entry.bets.toLocaleString()} bets`);
+      }
+    }
+    console.log(`  Updated ${betsUpdated}/${gameDataMap.size} games with bets data`);
 
     // Convert map to array
     const games = Array.from(gameDataMap.values());
