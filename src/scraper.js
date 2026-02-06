@@ -513,6 +513,89 @@ export async function scrapeActionNetwork(sport = 'nba') {
       }
     }
 
+    // 4. Extract total bets count directly from the page
+    // The .public-betting__number-of-bets element is inside the table rows.
+    // We walk up from each bets element to its parent <tr>, find team names there,
+    // and map the bets count back to the game.
+    console.log('\n====== EXTRACTING BETS COUNT ======');
+    const betsData = await page.evaluate((sportType) => {
+      const SPORT_NICKNAMES = {
+        'NBA': [
+          'Hawks', 'Celtics', 'Nets', 'Hornets', 'Bulls', 'Cavaliers',
+          'Mavericks', 'Nuggets', 'Pistons', 'Warriors', 'Rockets',
+          'Pacers', 'Clippers', 'Lakers', 'Grizzlies', 'Heat', 'Bucks',
+          'Timberwolves', 'Pelicans', 'Knicks', 'Thunder', 'Magic',
+          '76ers', 'Suns', 'Blazers', 'Kings', 'Spurs', 'Raptors',
+          'Jazz', 'Wizards'
+        ],
+        'NFL': [
+          'Cardinals', 'Falcons', 'Ravens', 'Bills', 'Panthers', 'Bears',
+          'Bengals', 'Browns', 'Cowboys', 'Broncos', 'Lions', 'Packers',
+          'Texans', 'Colts', 'Jaguars', 'Chiefs', 'Raiders', 'Chargers',
+          'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants',
+          'Jets', 'Eagles', 'Steelers', '49ers', 'Seahawks', 'Buccaneers',
+          'Titans', 'Commanders'
+        ],
+        'NHL': [
+          'Ducks', 'Bruins', 'Sabres', 'Flames', 'Hurricanes', 'Blackhawks',
+          'Avalanche', 'Blue Jackets', 'Stars', 'Red Wings', 'Oilers',
+          'Panthers', 'Kings', 'Wild', 'Canadiens', 'Predators', 'Devils',
+          'Islanders', 'Rangers', 'Senators', 'Flyers', 'Penguins', 'Sharks',
+          'Kraken', 'Blues', 'Lightning', 'Maple Leafs', 'Canucks',
+          'Golden Knights', 'Capitals', 'Jets', 'Utah'
+        ]
+      };
+      const nicknames = SPORT_NICKNAMES[sportType.toUpperCase()] || SPORT_NICKNAMES['NBA'];
+
+      const results = [];
+      // Find every bets element on the page
+      const betsElements = document.querySelectorAll('.public-betting__number-of-bets, [class*="number-of-bets"]');
+
+      betsElements.forEach(el => {
+        // Parse the number
+        const betsMatch = el.textContent?.match(/([\d,]+)/);
+        if (!betsMatch) return;
+        const betsCount = parseInt(betsMatch[1].replace(/,/g, ''));
+        if (isNaN(betsCount) || betsCount === 0) return;
+
+        // Walk up to the closest <tr>
+        const row = el.closest('tr');
+        if (!row) return;
+
+        // Find team names in the row
+        const rowText = row.textContent || '';
+        const teamsFound = [];
+        for (const nick of nicknames) {
+          if (rowText.includes(nick) && !teamsFound.includes(nick)) {
+            teamsFound.push(nick);
+            if (teamsFound.length >= 2) break;
+          }
+        }
+
+        if (teamsFound.length >= 2) {
+          results.push({
+            awayTeam: teamsFound[0],
+            homeTeam: teamsFound[1],
+            bets: betsCount,
+          });
+        }
+      });
+
+      return results;
+    }, sport);
+
+    console.log(`  Found ${betsData.length} bets entries`);
+
+    // Map bets back to games
+    for (const entry of betsData) {
+      const gameKey = `${entry.awayTeam}_${entry.homeTeam}`;
+      const game = gameDataMap.get(gameKey);
+      if (game && entry.bets) {
+        game.total_bets = entry.bets;
+        console.log(`  ✅ ${entry.awayTeam} @ ${entry.homeTeam}: ${entry.bets.toLocaleString()} bets`);
+      }
+    }
+
     // Convert map to array
     const games = Array.from(gameDataMap.values());
 
