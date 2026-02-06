@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { scrapeActionNetwork } from './scraper.js';
 import { createScrapingJob, updateJobStatus, savePublicBettingData } from './database.js';
 
-const SPORTS = ['nba', 'nfl', 'nhl', 'soccer', 'tennis'];
+const SPORTS = ['nba', 'nfl', 'nhl'];
 
 export function startScheduler() {
   console.log('⏰ Starting multi-sport scheduler...');

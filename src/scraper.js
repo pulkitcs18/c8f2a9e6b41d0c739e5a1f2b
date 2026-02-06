@@ -514,11 +514,8 @@ export async function scrapeActionNetwork(sport = 'nba') {
     }
 
     // 4. Extract total bets count directly from the page
-    // The .public-betting__number-of-bets element is inside the table rows.
-    // We walk up from each bets element to its parent <tr>, find team names there,
-    // and map the bets count back to the game.
     console.log('\n====== EXTRACTING BETS COUNT ======');
-    const betsData = await page.evaluate((sportType) => {
+    const betsDebug = await page.evaluate((sportType) => {
       const SPORT_NICKNAMES = {
         'NBA': [
           'Hawks', 'Celtics', 'Nets', 'Hornets', 'Bulls', 'Cavaliers',
@@ -547,23 +544,57 @@ export async function scrapeActionNetwork(sport = 'nba') {
       };
       const nicknames = SPORT_NICKNAMES[sportType.toUpperCase()] || SPORT_NICKNAMES['NBA'];
 
+      // DEBUG: Check what selectors find
+      const debug = {
+        // 1. Check for bets elements by exact class
+        exactClassCount: document.querySelectorAll('.public-betting__number-of-bets').length,
+        // 2. Check for bets elements by partial class match
+        partialClassCount: document.querySelectorAll('[class*="number-of-bets"]').length,
+        // 3. Check for ANY element containing "bets" in class name
+        anyBetsClass: document.querySelectorAll('[class*="bets"]').length,
+        // 4. Check the last <th> header text (should be "Bets" if column exists)
+        lastThText: (() => {
+          const ths = document.querySelectorAll('thead th');
+          return ths.length > 0 ? ths[ths.length - 1]?.textContent?.trim() : 'no thead found';
+        })(),
+        // 5. Get all th texts to see table columns
+        allThTexts: Array.from(document.querySelectorAll('thead th')).map(th => th.textContent?.trim()),
+        // 6. Check how many <tr> rows exist in tbody
+        tbodyRowCount: document.querySelectorAll('tbody tr').length,
+        // 7. For first <tr>, get all td classes and text snippets
+        firstRowInfo: (() => {
+          const firstRow = document.querySelector('tbody tr');
+          if (!firstRow) return 'no rows';
+          const tds = firstRow.querySelectorAll('td');
+          return Array.from(tds).map((td, i) => ({
+            index: i,
+            classes: td.className,
+            textSnippet: td.textContent?.trim().substring(0, 80),
+            childClasses: Array.from(td.querySelectorAll('*')).map(c => c.className).filter(Boolean).slice(0, 5),
+          }));
+        })(),
+        // 8. Search the entire page HTML for "number-of-bets" string
+        htmlContainsBetsClass: document.documentElement.innerHTML.includes('number-of-bets'),
+        // 9. Search for any element with text that looks like a bets count (4-6 digit number with comma)
+        betsLikeText: (() => {
+          const allText = document.body?.innerText || '';
+          const matches = allText.match(/\b\d{1,2},\d{3}\b/g);
+          return matches ? matches.slice(0, 10) : [];
+        })(),
+      };
+
+      // Now try extraction
       const results = [];
-      // Find every bets element on the page
       const betsElements = document.querySelectorAll('.public-betting__number-of-bets, [class*="number-of-bets"]');
 
       betsElements.forEach(el => {
-        // Parse the number
         const betsMatch = el.textContent?.match(/([\d,]+)/);
         if (!betsMatch) return;
         const betsCount = parseInt(betsMatch[1].replace(/,/g, ''));
         if (isNaN(betsCount) || betsCount === 0) return;
 
-        // Walk up to the closest <tr>
         const row = el.closest('tr');
-        if (!row) return;
-
-        // Find team names in the row
-        const rowText = row.textContent || '';
+        const rowText = row ? (row.textContent || '') : '';
         const teamsFound = [];
         for (const nick of nicknames) {
           if (rowText.includes(nick) && !teamsFound.includes(nick)) {
@@ -572,22 +603,42 @@ export async function scrapeActionNetwork(sport = 'nba') {
           }
         }
 
-        if (teamsFound.length >= 2) {
-          results.push({
-            awayTeam: teamsFound[0],
-            homeTeam: teamsFound[1],
-            bets: betsCount,
-          });
-        }
+        results.push({
+          awayTeam: teamsFound[0] || null,
+          homeTeam: teamsFound[1] || null,
+          bets: betsCount,
+          hasParentTr: !!row,
+          teamsFoundCount: teamsFound.length,
+          elClass: el.className,
+          elTag: el.tagName,
+          parentTag: el.parentElement?.tagName,
+          parentClass: el.parentElement?.className,
+        });
       });
 
-      return results;
+      return { debug, results };
     }, sport);
 
-    console.log(`  Found ${betsData.length} bets entries`);
+    // Log all debug info
+    console.log('  DEBUG info:');
+    console.log(`    exactClassCount (.public-betting__number-of-bets): ${betsDebug.debug.exactClassCount}`);
+    console.log(`    partialClassCount ([class*="number-of-bets"]): ${betsDebug.debug.partialClassCount}`);
+    console.log(`    anyBetsClass ([class*="bets"]): ${betsDebug.debug.anyBetsClass}`);
+    console.log(`    lastThText: "${betsDebug.debug.lastThText}"`);
+    console.log(`    allThTexts: ${JSON.stringify(betsDebug.debug.allThTexts)}`);
+    console.log(`    tbodyRowCount: ${betsDebug.debug.tbodyRowCount}`);
+    console.log(`    htmlContainsBetsClass: ${betsDebug.debug.htmlContainsBetsClass}`);
+    console.log(`    betsLikeText (comma numbers on page): ${JSON.stringify(betsDebug.debug.betsLikeText)}`);
+    console.log(`    firstRowInfo: ${JSON.stringify(betsDebug.debug.firstRowInfo, null, 2)}`);
 
-    // Map bets back to games
-    for (const entry of betsData) {
+    console.log(`  Found ${betsDebug.results.length} bets elements:`);
+    for (const r of betsDebug.results) {
+      console.log(`    bets=${r.bets}, teams=[${r.awayTeam}, ${r.homeTeam}], tag=${r.elTag}, class="${r.elClass}", parentTag=${r.parentTag}, parentClass="${r.parentClass}", hasTr=${r.hasParentTr}, teamsFound=${r.teamsFoundCount}`);
+    }
+
+    // Map bets back to games (only entries with 2 teams)
+    for (const entry of betsDebug.results) {
+      if (!entry.awayTeam || !entry.homeTeam) continue;
       const gameKey = `${entry.awayTeam}_${entry.homeTeam}`;
       const game = gameDataMap.get(gameKey);
       if (game && entry.bets) {
