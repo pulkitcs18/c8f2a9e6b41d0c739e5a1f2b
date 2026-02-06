@@ -1,18 +1,20 @@
-// src/database.js - Updated to use Lovable API endpoint
+// src/database.js - Direct Supabase integration
+import { createClient } from '@supabase/supabase-js';
 
-const LOVABLE_ENDPOINT = process.env.LOVABLE_API_ENDPOINT;
-const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!LOVABLE_ENDPOINT || !SCRAPER_API_KEY) {
-  console.error('❌ Missing Scraper credentials!');
-  console.error('Required: LOVABLE_API_ENDPOINT and SCRAPER_API_KEY');
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ Missing Supabase credentials!');
+  console.error('Required: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
   process.exit(1);
 }
 
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
 export async function createScrapingJob(sport = 'NBA') {
-  // Job creation will be handled by the Lovable endpoint
-  console.log(`✅ Will create scraping job for ${sport} via Lovable API`);
-  return { id: 'pending', sport, status: 'running' };
+  console.log(`✅ Starting scraping job for ${sport}`);
+  return { id: 'local', sport, status: 'running' };
 }
 
 export async function updateJobStatus(
@@ -22,7 +24,6 @@ export async function updateJobStatus(
   errorMessage = null,
   duration = 0
 ) {
-  // Job updates handled by Lovable endpoint
   console.log(
     `✅ Job ${jobId}: ${status} (${gamesScraped} games, ${duration}ms)`
   );
@@ -35,34 +36,40 @@ export async function savePublicBettingData(games) {
   }
 
   try {
-    console.log(`📤 Sending ${games.length} games to Lovable endpoint...`);
+    console.log(`📤 Saving ${games.length} games to Supabase...`);
 
-    const response = await fetch(LOVABLE_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SCRAPER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sport: games[0]?.sport || 'NBA',
-        games,
-      }),
-    });
+    const now = new Date().toISOString();
+    const rows = games.map(game => ({
+      game_id: game.game_id,
+      sport: game.sport,
+      scheduled_time: game.scheduled_time,
+      home_team: game.home_team,
+      away_team: game.away_team,
+      spread_line: game.spread_line,
+      spread_home_bets_pct: game.spread_home_bets_pct,
+      spread_home_money_pct: game.spread_home_money_pct,
+      total_line: game.total_line,
+      over_bets_pct: game.over_bets_pct,
+      over_money_pct: game.over_money_pct,
+      ml_home_odds: game.ml_home_odds != null ? String(game.ml_home_odds) : null,
+      ml_away_odds: game.ml_away_odds != null ? String(game.ml_away_odds) : null,
+      ml_home_bets_pct: game.ml_home_bets_pct,
+      ml_home_money_pct: game.ml_home_money_pct,
+      scraped_at: now,
+      updated_at: now,
+    }));
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `API request failed: ${response.status} - ${errorText}`
-      );
+    // Upsert by game_id so re-scraping updates existing rows
+    const { data, error } = await supabase
+      .from('action_network_public_betting')
+      .upsert(rows, { onConflict: 'game_id' });
+
+    if (error) {
+      throw new Error(`Supabase upsert failed: ${error.message}`);
     }
 
-    const result = await response.json();
-    console.log(
-      `✅ Saved ${result.games_saved || games.length} games to database`
-    );
-    console.log(`📊 Response:`, JSON.stringify(result, null, 2));
-
-    return result;
+    console.log(`✅ Saved ${games.length} games to database`);
+    return { games_saved: games.length };
   } catch (error) {
     console.error('❌ Failed to save data:', error.message);
     throw error;
@@ -71,28 +78,20 @@ export async function savePublicBettingData(games) {
 
 export async function testConnection() {
   try {
-    console.log(`🔌 Testing connection to: ${LOVABLE_ENDPOINT}`);
+    console.log(`🔌 Testing connection to Supabase: ${SUPABASE_URL}`);
 
-    const response = await fetch(LOVABLE_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SCRAPER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sport: 'NBA',
-        games: [],
-      }),
-    });
+    const { count, error } = await supabase
+      .from('action_network_public_betting')
+      .select('*', { count: 'exact', head: true });
 
-    if (!response.ok) {
-      throw new Error(`Connection test failed: ${response.status}`);
+    if (error) {
+      throw new Error(`Query failed: ${error.message}`);
     }
 
-    console.log('✅ Lovable API connection successful');
+    console.log(`✅ Supabase connection successful (${count} existing rows)`);
     return true;
   } catch (error) {
-    console.error('❌ Lovable API connection failed:', error.message);
+    console.error('❌ Supabase connection failed:', error.message);
     return false;
   }
 }
