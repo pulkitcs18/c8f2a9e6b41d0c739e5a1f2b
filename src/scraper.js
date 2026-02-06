@@ -433,6 +433,8 @@ export async function scrapeActionNetwork(sport = 'nba') {
           ml_away_odds: null,
           ml_home_bets_pct: null,
           ml_home_money_pct: null,
+          // Total number of bets
+          total_bets: null,
         });
       }
 
@@ -447,6 +449,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
       // Store home percentages (row shows away, so invert)
       game.spread_home_bets_pct = row.homeBetsPct;
       game.spread_home_money_pct = row.homeMoneyPct;
+      // Store total bets count (same across all markets, grab from first available)
+      if (row.totalBets != null) {
+        game.total_bets = row.totalBets;
+      }
     }
 
     // 2. Scrape TOTAL
