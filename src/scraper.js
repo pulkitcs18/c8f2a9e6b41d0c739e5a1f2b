@@ -290,7 +290,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
 
     const page = await browser.newPage();
 
-    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setViewport({ width: 1920, height: 5000 });
     await page.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
@@ -396,30 +396,11 @@ export async function scrapeActionNetwork(sport = 'nba') {
     // Initialize game data map
     const gameDataMap = new Map();
 
-    // 0. Extract total_bets from All Markets view first.
-    // Single-market views (Spread/Total/ML) lazy-load rows in headless Chrome so only
-    // the first ~2 above-the-fold games render their bets element. All Markets view
-    // renders all rows fully upfront — confirmed via DevTools: all 33 elements (3 per
-    // game × 11 games) are visible with display=block, offsetParent=TD, no scroll needed.
-    console.log('\n====== EXTRACTING total_bets FROM ALL MARKETS VIEW ======');
-    const allMarketsSelected = await selectMarketType(page, 'All Markets', sport);
-    const gameTotalBetsMap = new Map();
-
-    if (allMarketsSelected) {
-      const allMarketsData = await extractMarketData(page, 'All Markets', sport);
-      for (const row of allMarketsData) {
-        const gameKey = `${row.awayTeam}_${row.homeTeam}`;
-        // All Markets has 3 rows per game — take first hit per game
-        if (!gameTotalBetsMap.has(gameKey) && row.totalBets != null) {
-          gameTotalBetsMap.set(gameKey, row.totalBets);
-        }
-      }
-      console.log(`  Captured total_bets for ${gameTotalBetsMap.size} games from All Markets view`);
-    }
-
     // 1. Scrape SPREAD
+    // Viewport is set to 5000px tall so all rows start within the viewport on load.
+    // The bets count text is populated by an intersection observer — with height=5000
+    // all rows are initially visible, IO fires for all games, no scrolling needed.
     console.log('\n====== SCRAPING SPREAD DATA ======');
-    await selectMarketType(page, 'Spread', sport);
     const spreadData = await extractMarketData(page, 'Spread', sport);
 
     for (const row of spreadData) {
@@ -441,7 +422,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
           ml_away_odds: null,
           ml_home_bets_pct: null,
           ml_home_money_pct: null,
-          total_bets: gameTotalBetsMap.get(gameKey) ?? null,
+          total_bets: null,
         });
       }
 
@@ -454,6 +435,9 @@ export async function scrapeActionNetwork(sport = 'nba') {
       }
       game.spread_home_bets_pct = row.homeBetsPct;
       game.spread_home_money_pct = row.homeMoneyPct;
+      if (row.totalBets != null) {
+        game.total_bets = row.totalBets;
+      }
     }
 
     // 2. Scrape TOTAL
