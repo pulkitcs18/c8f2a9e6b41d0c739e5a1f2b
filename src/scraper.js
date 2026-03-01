@@ -230,16 +230,6 @@ async function extractMarketData(page, marketType, sport = 'nba') {
           if (i === 1) line2 = oddsText;
         });
 
-        // Extract bet count
-        const betsElement = row.querySelector('.public-betting__number-of-bets, [class*="number-of-bets"]');
-        let totalBets = null;
-        if (betsElement) {
-          const betsMatch = betsElement.textContent?.match(/([\d,]+)/);
-          if (betsMatch) {
-            totalBets = parseInt(betsMatch[1].replace(/,/g, ''));
-          }
-        }
-
         // Extract diff percentage
         const diffElement = row.querySelector('.public-betting__diff-percentage, [class*="diff"]');
         let diff = null;
@@ -261,8 +251,7 @@ async function extractMarketData(page, marketType, sport = 'nba') {
           awayMoneyPct: percentages[2] || null,
           homeMoneyPct: percentages[3] || null,
           diff,
-          totalBets,
-          rowIndex: index,
+          totalBets: parseInt((row.querySelector('.public-betting__number-of-bets')?.textContent || '').replace(/,/g, '')) || null,
         });
 
       } catch (err) {
@@ -520,59 +509,6 @@ export async function scrapeActionNetwork(sport = 'nba') {
         }
       }
     }
-
-    // 4. Extract total bets count by row position
-    // Use row index mapping from spreadData to avoid team-name matching bugs
-    // (the old approach matched teams by nickname array order, not DOM order,
-    //  causing away/home swaps and key mismatches for ~half the games)
-    console.log('\n====== EXTRACTING BETS COUNT ======');
-
-    // Build row index → game key mapping from spread extraction
-    const rowToGameKey = new Map();
-    for (const row of spreadData) {
-      rowToGameKey.set(row.rowIndex, `${row.awayTeam}_${row.homeTeam}`);
-    }
-
-    // Scroll to bottom to ensure all bets elements are rendered
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const betsData = await page.evaluate(() => {
-      const results = [];
-      const rows = document.querySelectorAll('tbody tr');
-      rows.forEach((row, index) => {
-        const betsEl = row.querySelector('.public-betting__number-of-bets, [class*="number-of-bets"]');
-        let bets = null;
-        if (betsEl) {
-          const match = betsEl.textContent?.match(/([\d,]+)/);
-          if (match) {
-            bets = parseInt(match[1].replace(/,/g, ''));
-            if (isNaN(bets)) bets = null;
-          }
-        }
-        results.push({ index, bets });
-      });
-      return results;
-    });
-
-    console.log(`  Found ${betsData.length} rows, bets values: ${JSON.stringify(betsData.map(r => r.bets))}`);
-
-    let betsUpdated = 0;
-    for (const entry of betsData) {
-      if (entry.bets == null) continue;
-      const gameKey = rowToGameKey.get(entry.index);
-      if (!gameKey) {
-        console.log(`  ⚠️ Row ${entry.index}: ${entry.bets} bets but no game mapping`);
-        continue;
-      }
-      const game = gameDataMap.get(gameKey);
-      if (game) {
-        game.total_bets = entry.bets;
-        betsUpdated++;
-        console.log(`  ✅ ${gameKey}: ${entry.bets.toLocaleString()} bets`);
-      }
-    }
-    console.log(`  Updated ${betsUpdated}/${gameDataMap.size} games with bets data`);
 
     // Convert map to array
     const games = Array.from(gameDataMap.values());

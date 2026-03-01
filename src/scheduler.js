@@ -3,11 +3,12 @@ import { scrapeActionNetwork } from './scraper.js';
 import { createScrapingJob, updateJobStatus, savePublicBettingData } from './database.js';
 
 const SPORTS = ['nba', 'nfl', 'nhl'];
+const RETRY_DELAYS_MS = [30_000, 60_000, 120_000]; // 30s, 60s, 120s between retries
 
 export function startScheduler() {
   console.log('⏰ Starting multi-sport scheduler...');
-  console.log(`📅 Will scrape ${SPORTS.join(', ').toUpperCase()} every 2 hours`);
-  console.log(`🕐 Next run: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString()}\n`);
+  console.log(`📅 Will scrape ${SPORTS.join(', ').toUpperCase()} every hour`);
+  console.log(`🕐 Next run: ${new Date(Date.now() + 60 * 60 * 1000).toLocaleTimeString()}\n`);
 
   // Run every hour
   cron.schedule('0 * * * *', async () => {
@@ -30,31 +31,54 @@ export function startScheduler() {
   })();
 }
 
+async function retryWithBackoff(fn, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= RETRY_DELAYS_MS.length + 1; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt <= RETRY_DELAYS_MS.length) {
+        const delaySec = RETRY_DELAYS_MS[attempt - 1] / 1000;
+        console.error(`  ❌ Attempt ${attempt}/${RETRY_DELAYS_MS.length + 1} failed for ${label}: ${error.message}`);
+        console.error(`  ⏳ Retrying in ${delaySec}s...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
+      } else {
+        console.error(`  ❌ All ${RETRY_DELAYS_MS.length + 1} attempts failed for ${label}. Giving up until next scheduled run.`);
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function runScrapeJob(sport) {
   const startTime = Date.now();
-  let job = null;
+  const job = createScrapingJob(sport);
 
   try {
-    job = await createScrapingJob(sport);
-    const games = await scrapeActionNetwork(sport);
+    const games = await retryWithBackoff(
+      () => scrapeActionNetwork(sport),
+      `${sport.toUpperCase()} scrape`
+    );
 
     if (games.length > 0) {
       await savePublicBettingData(games);
     }
 
-    const duration = Date.now() - startTime;
-    await updateJobStatus(job.id, 'completed', games.length, null, duration);
-
-    console.log(`\n✅ Job completed in ${duration}ms`);
-    console.log(`📊 Scraped ${games.length} games`);
-    console.log(`🕐 Next run: ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString()}\n`);
+    const incompleteGames = games.filter(
+      g => g.spread_line == null || g.total_line == null || g.ml_home_odds == null
+    );
+    updateJobStatus(job, 'completed', {
+      gamesScraped: games.length,
+      gamesIncomplete: incompleteGames.length,
+      durationMs: Date.now() - startTime,
+    });
+    console.log(`🕐 Next run: ${new Date(Date.now() + 60 * 60 * 1000).toLocaleTimeString()}\n`);
 
   } catch (error) {
-    console.error('\n❌ Job failed:', error.message);
-
-    if (job) {
-      const duration = Date.now() - startTime;
-      await updateJobStatus(job.id, 'failed', 0, error.message, duration);
-    }
+    updateJobStatus(job, 'failed', {
+      errorMessage: error.message,
+      durationMs: Date.now() - startTime,
+    });
   }
 }

@@ -12,21 +12,25 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-export async function createScrapingJob(sport = 'NBA') {
-  console.log(`✅ Starting scraping job for ${sport}`);
-  return { id: 'local', sport, status: 'running' };
+export function createScrapingJob(sport) {
+  console.log(`\n--- [${sport.toUpperCase()}] Scrape job started at ${new Date().toISOString()} ---`);
+  return { id: `${sport}-${Date.now()}`, sport };
 }
 
-export async function updateJobStatus(
-  jobId,
-  status,
-  gamesScraped = 0,
-  errorMessage = null,
-  duration = 0
-) {
-  console.log(
-    `✅ Job ${jobId}: ${status} (${gamesScraped} games, ${duration}ms)`
-  );
+export function updateJobStatus(job, status, summary = {}) {
+  const { gamesScraped = 0, gamesIncomplete = 0, errorMessage = null, durationMs = 0 } = summary;
+  const ts = new Date().toISOString();
+  if (status === 'completed') {
+    console.log(`[${job.sport.toUpperCase()}] ✅ COMPLETED at ${ts}`);
+    console.log(`  Games written:   ${gamesScraped}`);
+    if (gamesIncomplete > 0) {
+      console.log(`  Incomplete data: ${gamesIncomplete} game(s) missing spread / total / ML`);
+    }
+    console.log(`  Runtime:         ${(durationMs / 1000).toFixed(1)}s`);
+  } else {
+    console.error(`[${job.sport.toUpperCase()}] ❌ FAILED at ${ts} after ${(durationMs / 1000).toFixed(1)}s`);
+    if (errorMessage) console.error(`  Error: ${errorMessage}`);
+  }
 }
 
 export async function savePublicBettingData(games) {
