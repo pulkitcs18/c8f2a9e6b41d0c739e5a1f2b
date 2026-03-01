@@ -230,16 +230,6 @@ async function extractMarketData(page, marketType, sport = 'nba') {
           if (i === 1) line2 = oddsText;
         });
 
-        // Extract diff percentage
-        const diffElement = row.querySelector('.public-betting__diff-percentage, [class*="diff"]');
-        let diff = null;
-        if (diffElement) {
-          const diffMatch = diffElement.textContent?.match(/([+-]?\d+)%?/);
-          if (diffMatch) {
-            diff = parseInt(diffMatch[1]);
-          }
-        }
-
         results.push({
           awayTeam,
           homeTeam,
@@ -250,8 +240,6 @@ async function extractMarketData(page, marketType, sport = 'nba') {
           homeBetsPct: percentages[1] || null,
           awayMoneyPct: percentages[2] || null,
           homeMoneyPct: percentages[3] || null,
-          diff,
-          totalBets: parseInt((row.querySelector('.public-betting__number-of-bets')?.textContent || '').replace(/,/g, '')) || null,
         });
 
       } catch (err) {
@@ -396,10 +384,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
       }
       return map;
     });
-    console.log(`📊 Extracted num_bets from __NEXT_DATA__ for ${Object.keys(numBetsMap).length} games:`);
-    for (const [key, val] of Object.entries(numBetsMap)) {
-      console.log(`  ${key}: ${val}`);
-    }
+    console.log(`📊 Extracted num_bets from __NEXT_DATA__ for ${Object.keys(numBetsMap).length} game key variants`);
 
     // Choose the sport from dropdown as requested
     await selectLeague(page, sport);
@@ -430,10 +415,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
     // Initialize game data map
     const gameDataMap = new Map();
 
-    // 1. Scrape SPREAD
-    // Viewport is set to 5000px tall so all rows start within the viewport on load.
-    // The bets count text is populated by an intersection observer — with height=5000
-    // all rows are initially visible, IO fires for all games, no scrolling needed.
+    // 1. Scrape SPREAD (total_bets comes from __NEXT_DATA__ JSON, not DOM)
     console.log('\n====== SCRAPING SPREAD DATA ======');
     const spreadData = await extractMarketData(page, 'Spread', sport);
 
@@ -469,9 +451,6 @@ export async function scrapeActionNetwork(sport = 'nba') {
       }
       game.spread_home_bets_pct = row.homeBetsPct;
       game.spread_home_money_pct = row.homeMoneyPct;
-      if (row.totalBets != null) {
-        game.total_bets = row.totalBets;
-      }
     }
 
     // 2. Scrape TOTAL
