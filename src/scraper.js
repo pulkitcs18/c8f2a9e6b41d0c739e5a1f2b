@@ -368,12 +368,36 @@ export async function scrapeActionNetwork(sport = 'nba') {
     console.log('✅ Public betting page loaded');
 
     // ==================== DIAGNOSTIC: __NEXT_DATA__ ====================
-    const nextData = await page.evaluate(() => {
-      return JSON.stringify(window.__NEXT_DATA__);
+    const nextDataSearch = await page.evaluate(() => {
+      const data = window.__NEXT_DATA__;
+      const hits = [];
+
+      // Recursively walk the object looking for ticket/bet-count keys
+      function walk(obj, path) {
+        if (!obj || typeof obj !== 'object') return;
+        for (const [key, val] of Object.entries(obj)) {
+          const cur = `${path}.${key}`;
+          const keyLower = key.toLowerCase();
+          if (/ticket|numbets|num_bets|totalbet|total_bet|betcount|bet_count|wager|handle/.test(keyLower)) {
+            hits.push({ path: cur, value: val });
+          }
+          if (typeof val === 'object' && val !== null) {
+            walk(val, cur);
+          }
+        }
+      }
+
+      walk(data, 'root');
+      return { hits, topKeys: Object.keys(data?.props?.pageProps || {}) };
     });
-    console.log('\n🔬 __NEXT_DATA__ dump:');
-    console.log(nextData);
-    console.log('\n🔬 End __NEXT_DATA__ dump\n');
+
+    console.log('\n🔬 __NEXT_DATA__ search results:');
+    console.log('Top-level pageProps keys:', JSON.stringify(nextDataSearch.topKeys));
+    console.log(`Matching hits (${nextDataSearch.hits.length}):`);
+    for (const h of nextDataSearch.hits) {
+      console.log(`  ${h.path} = ${JSON.stringify(h.value)}`);
+    }
+    console.log('🔬 End search\n');
 
     // Choose the sport from dropdown as requested
     await selectLeague(page, sport);
