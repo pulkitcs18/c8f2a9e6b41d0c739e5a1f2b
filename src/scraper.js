@@ -367,6 +367,14 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Public betting page loaded');
 
+    // ==================== DIAGNOSTIC: __NEXT_DATA__ ====================
+    const nextData = await page.evaluate(() => {
+      return JSON.stringify(window.__NEXT_DATA__);
+    });
+    console.log('\n🔬 __NEXT_DATA__ dump:');
+    console.log(nextData);
+    console.log('\n🔬 End __NEXT_DATA__ dump\n');
+
     // Choose the sport from dropdown as requested
     await selectLeague(page, sport);
 
