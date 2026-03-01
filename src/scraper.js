@@ -397,8 +397,11 @@ export async function scrapeActionNetwork(sport = 'nba') {
     const gameDataMap = new Map();
 
     // 1. Scrape SPREAD (default - already loaded)
-    // Scroll to bottom first so lazy-rendered elements (e.g. total_bets) are in the DOM for all rows
-    await page.evaluate(() => document.querySelector('tbody tr:last-child')?.scrollIntoView());
+    // Use real mouse wheel input to trigger intersection observers for lazy-rendered elements.
+    // DOM scroll methods (scrollTo, scrollIntoView) don't trigger IO callbacks in headless Chrome;
+    // mouse wheel events go through Chromium's input pipeline and do.
+    await page.mouse.move(960, 400);
+    await page.mouse.wheel({ deltaY: 5000 });
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     console.log('\n====== SCRAPING SPREAD DATA ======');
