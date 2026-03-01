@@ -372,10 +372,18 @@ export async function scrapeActionNetwork(sport = 'nba') {
       const games = window.__NEXT_DATA__?.props?.pageProps?.scoreboardResponse?.games || [];
       const map = {};
       for (const g of games) {
-        const away = g.teams?.[0]?.display_name;
-        const home = g.teams?.[1]?.display_name;
-        if (away && home && g.num_bets != null) {
-          map[`${away}_${home}`] = g.num_bets;
+        if (g.num_bets == null) continue;
+        // Collect all name variants per team (display_name + short_name)
+        const t0 = g.teams?.[0], t1 = g.teams?.[1];
+        if (!t0 || !t1) continue;
+        const names0 = [...new Set([t0.display_name, t0.short_name].filter(Boolean))];
+        const names1 = [...new Set([t1.display_name, t1.short_name].filter(Boolean))];
+        // Store both orderings for every name combination
+        for (const n0 of names0) {
+          for (const n1 of names1) {
+            map[`${n0}_${n1}`] = g.num_bets;
+            map[`${n1}_${n0}`] = g.num_bets;
+          }
         }
       }
       return map;
