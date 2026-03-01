@@ -397,6 +397,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
     const gameDataMap = new Map();
 
     // 1. Scrape SPREAD (default - already loaded)
+    // Scroll to bottom first so lazy-rendered elements (e.g. total_bets) are in the DOM for all rows
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
     console.log('\n====== SCRAPING SPREAD DATA ======');
     const spreadData = await extractMarketData(page, 'Spread', sport);
 
