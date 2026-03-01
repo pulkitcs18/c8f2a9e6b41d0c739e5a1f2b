@@ -396,15 +396,30 @@ export async function scrapeActionNetwork(sport = 'nba') {
     // Initialize game data map
     const gameDataMap = new Map();
 
-    // 1. Scrape SPREAD (default - already loaded)
-    // Use real mouse wheel input to trigger intersection observers for lazy-rendered elements.
-    // DOM scroll methods (scrollTo, scrollIntoView) don't trigger IO callbacks in headless Chrome;
-    // mouse wheel events go through Chromium's input pipeline and do.
-    await page.mouse.move(960, 400);
-    await page.mouse.wheel({ deltaY: 5000 });
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // 0. Extract total_bets from All Markets view first.
+    // Single-market views (Spread/Total/ML) lazy-load rows in headless Chrome so only
+    // the first ~2 above-the-fold games render their bets element. All Markets view
+    // renders all rows fully upfront — confirmed via DevTools: all 33 elements (3 per
+    // game × 11 games) are visible with display=block, offsetParent=TD, no scroll needed.
+    console.log('\n====== EXTRACTING total_bets FROM ALL MARKETS VIEW ======');
+    const allMarketsSelected = await selectMarketType(page, 'All Markets', sport);
+    const gameTotalBetsMap = new Map();
 
+    if (allMarketsSelected) {
+      const allMarketsData = await extractMarketData(page, 'All Markets', sport);
+      for (const row of allMarketsData) {
+        const gameKey = `${row.awayTeam}_${row.homeTeam}`;
+        // All Markets has 3 rows per game — take first hit per game
+        if (!gameTotalBetsMap.has(gameKey) && row.totalBets != null) {
+          gameTotalBetsMap.set(gameKey, row.totalBets);
+        }
+      }
+      console.log(`  Captured total_bets for ${gameTotalBetsMap.size} games from All Markets view`);
+    }
+
+    // 1. Scrape SPREAD
     console.log('\n====== SCRAPING SPREAD DATA ======');
+    await selectMarketType(page, 'Spread', sport);
     const spreadData = await extractMarketData(page, 'Spread', sport);
 
     for (const row of spreadData) {
@@ -416,39 +431,29 @@ export async function scrapeActionNetwork(sport = 'nba') {
           scheduled_time: new Date().toISOString(),
           home_team: row.homeTeam,
           away_team: row.awayTeam,
-          // Spread data (NEW SCHEMA - only these fields)
           spread_line: null,
           spread_home_bets_pct: null,
           spread_home_money_pct: null,
-          // Total data (NEW SCHEMA - only these fields)
           total_line: null,
           over_bets_pct: null,
           over_money_pct: null,
-          // Moneyline data (NEW SCHEMA - only these fields)
           ml_home_odds: null,
           ml_away_odds: null,
           ml_home_bets_pct: null,
           ml_home_money_pct: null,
-          // Total number of bets
-          total_bets: null,
+          total_bets: gameTotalBetsMap.get(gameKey) ?? null,
         });
       }
 
       const game = gameDataMap.get(gameKey);
-      // Parse spread line
       if (row.line1) {
         const spreadMatch = row.line1.match(/([+-]?\d+\.?\d*)/);
         if (spreadMatch) {
           game.spread_line = parseFloat(spreadMatch[1]);
         }
       }
-      // Store home percentages (row shows away, so invert)
       game.spread_home_bets_pct = row.homeBetsPct;
       game.spread_home_money_pct = row.homeMoneyPct;
-      // Store total bets count (same across all markets, grab from first available)
-      if (row.totalBets != null) {
-        game.total_bets = row.totalBets;
-      }
     }
 
     // 2. Scrape TOTAL
@@ -473,10 +478,6 @@ export async function scrapeActionNetwork(sport = 'nba') {
           // Store over percentages only (new schema)
           game.over_bets_pct = row.awayBetsPct;
           game.over_money_pct = row.awayMoneyPct;
-          // Capture total_bets if not already set from Spread
-          if (row.totalBets != null && game.total_bets == null) {
-            game.total_bets = row.totalBets;
-          }
         }
       }
     }
@@ -509,10 +510,6 @@ export async function scrapeActionNetwork(sport = 'nba') {
           // Store home percentages for moneyline (new schema)
           game.ml_home_bets_pct = row.homeBetsPct;
           game.ml_home_money_pct = row.homeMoneyPct;
-          // Capture total_bets if not already set from Spread/Total
-          if (row.totalBets != null && game.total_bets == null) {
-            game.total_bets = row.totalBets;
-          }
         }
       }
     }
