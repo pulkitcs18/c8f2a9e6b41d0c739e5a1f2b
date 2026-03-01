@@ -376,8 +376,16 @@ export async function scrapeActionNetwork(sport = 'nba') {
         // Collect all name variants per team (display_name + short_name)
         const t0 = g.teams?.[0], t1 = g.teams?.[1];
         if (!t0 || !t1) continue;
-        const names0 = [...new Set([t0.display_name, t0.short_name].filter(Boolean))];
-        const names1 = [...new Set([t1.display_name, t1.short_name].filter(Boolean))];
+        // JSON "Trail Blazers" → DOM uses "Blazers", etc.
+        const DOM_ALIASES = { 'Trail Blazers': 'Blazers' };
+        const addAliases = (names) => {
+          for (const n of [...names]) {
+            if (DOM_ALIASES[n]) names.push(DOM_ALIASES[n]);
+          }
+          return names;
+        };
+        const names0 = addAliases([...new Set([t0.display_name, t0.short_name].filter(Boolean))]);
+        const names1 = addAliases([...new Set([t1.display_name, t1.short_name].filter(Boolean))]);
         // Store both orderings for every name combination
         for (const n0 of names0) {
           for (const n1 of names1) {
