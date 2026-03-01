@@ -2,7 +2,9 @@ import cron from 'node-cron';
 import { scrapeActionNetwork } from './scraper.js';
 import { createScrapingJob, updateJobStatus, savePublicBettingData } from './database.js';
 
-const SPORTS = ['nba', 'nfl', 'nhl'];
+const SPORTS = process.env.SPORT
+  ? [process.env.SPORT.toLowerCase()]
+  : ['nba', 'nfl', 'nhl'];
 const RETRY_DELAYS_MS = [30_000, 60_000, 120_000]; // 30s, 60s, 120s between retries
 
 export function startScheduler() {
