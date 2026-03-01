@@ -367,43 +367,35 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Public betting page loaded');
 
-    // ==================== DIAGNOSTIC: __NEXT_DATA__ (trimmed) ====================
-    const nextDataDiag = await page.evaluate(() => {
+    // ==================== DIAGNOSTIC: team name fields ====================
+    const teamDiag = await page.evaluate(() => {
       const games = window.__NEXT_DATA__?.props?.pageProps?.scoreboardResponse?.games || [];
-      if (games.length === 0) return { gameCount: 0, sample: null };
-
+      if (games.length === 0) return null;
       const g = games[0];
-      const marketIds = Object.keys(g.markets || {});
-      const m = g.markets?.[marketIds[0]] || {};
-      const ev = m.event || {};
-
-      // Extract just what we need from one market: team names, lines, bet_info
-      const extract = (arr) => (arr || []).map(item => ({
-        name: item.full_name || item.name || item.short_name || null,
-        line: item.line ?? item.odds ?? null,
-        tickets: item.bet_info?.tickets || null,
-        handle: item.bet_info?.handle || item.bet_info?.money || null,
-      }));
-
+      // Show all top-level game keys (except markets)
+      const topKeys = Object.keys(g).filter(k => k !== 'markets');
+      // Try every possible team location and dump its keys + all string values
+      const probe = (obj, label) => {
+        if (!obj) return { label, found: false };
+        const keys = Object.keys(obj);
+        const strings = {};
+        for (const k of keys) {
+          if (typeof obj[k] === 'string' || typeof obj[k] === 'number') strings[k] = obj[k];
+        }
+        return { label, keys, strings };
+      };
       return {
-        gameCount: games.length,
-        gameTopKeys: Object.keys(g).filter(k => k !== 'markets'),
-        // Key fields: where are team names & num_bets?
-        teams: { away: g.away_team || g.teams?.[0], home: g.home_team || g.teams?.[1] },
-        num_bets: g.num_bets,
-        start_time: g.start_time || g.scheduled || g.date,
-        // First market: does it have team names + lines + money%?
-        firstMarketId: marketIds[0],
-        marketTopKeys: Object.keys(m),
-        eventKeys: Object.keys(ev),
-        spread: extract(ev.spread),
-        total: extract(ev.total),
-        moneyline: extract(ev.moneyline),
+        topKeys,
+        away_team: probe(g.away_team, 'away_team'),
+        home_team: probe(g.home_team, 'home_team'),
+        teams_0: probe(g.teams?.[0], 'teams[0]'),
+        teams_1: probe(g.teams?.[1], 'teams[1]'),
+        // Maybe teams are top-level arrays?
+        teamsType: Array.isArray(g.teams) ? `array[${g.teams.length}]` : typeof g.teams,
       };
     });
-
-    console.log('\n🔬 __NEXT_DATA__ diagnostic (game 0, market 0):');
-    console.log(JSON.stringify(nextDataDiag, null, 2));
+    console.log('\n🔬 Team name diagnostic:');
+    console.log(JSON.stringify(teamDiag, null, 2));
     console.log('🔬 End diagnostic\n');
 
     // Choose the sport from dropdown as requested
