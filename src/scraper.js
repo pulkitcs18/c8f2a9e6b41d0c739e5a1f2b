@@ -398,7 +398,7 @@ export async function scrapeActionNetwork(sport = 'nba') {
 
     // 1. Scrape SPREAD (default - already loaded)
     // Scroll to bottom first so lazy-rendered elements (e.g. total_bets) are in the DOM for all rows
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.evaluate(() => document.querySelector('tbody tr:last-child')?.scrollIntoView());
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     console.log('\n====== SCRAPING SPREAD DATA ======');
