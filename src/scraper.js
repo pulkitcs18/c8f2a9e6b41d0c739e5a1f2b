@@ -367,36 +367,23 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Public betting page loaded');
 
-    // ==================== DIAGNOSTIC: team name fields ====================
-    const teamDiag = await page.evaluate(() => {
+    // ==================== EXTRACT total_bets FROM __NEXT_DATA__ ====================
+    const numBetsMap = await page.evaluate(() => {
       const games = window.__NEXT_DATA__?.props?.pageProps?.scoreboardResponse?.games || [];
-      if (games.length === 0) return null;
-      const g = games[0];
-      // Show all top-level game keys (except markets)
-      const topKeys = Object.keys(g).filter(k => k !== 'markets');
-      // Try every possible team location and dump its keys + all string values
-      const probe = (obj, label) => {
-        if (!obj) return { label, found: false };
-        const keys = Object.keys(obj);
-        const strings = {};
-        for (const k of keys) {
-          if (typeof obj[k] === 'string' || typeof obj[k] === 'number') strings[k] = obj[k];
+      const map = {};
+      for (const g of games) {
+        const away = g.teams?.[0]?.display_name;
+        const home = g.teams?.[1]?.display_name;
+        if (away && home && g.num_bets != null) {
+          map[`${away}_${home}`] = g.num_bets;
         }
-        return { label, keys, strings };
-      };
-      return {
-        topKeys,
-        away_team: probe(g.away_team, 'away_team'),
-        home_team: probe(g.home_team, 'home_team'),
-        teams_0: probe(g.teams?.[0], 'teams[0]'),
-        teams_1: probe(g.teams?.[1], 'teams[1]'),
-        // Maybe teams are top-level arrays?
-        teamsType: Array.isArray(g.teams) ? `array[${g.teams.length}]` : typeof g.teams,
-      };
+      }
+      return map;
     });
-    console.log('\n🔬 Team name diagnostic:');
-    console.log(JSON.stringify(teamDiag, null, 2));
-    console.log('🔬 End diagnostic\n');
+    console.log(`📊 Extracted num_bets from __NEXT_DATA__ for ${Object.keys(numBetsMap).length} games:`);
+    for (const [key, val] of Object.entries(numBetsMap)) {
+      console.log(`  ${key}: ${val}`);
+    }
 
     // Choose the sport from dropdown as requested
     await selectLeague(page, sport);
@@ -526,6 +513,13 @@ export async function scrapeActionNetwork(sport = 'nba') {
           game.ml_home_bets_pct = row.homeBetsPct;
           game.ml_home_money_pct = row.homeMoneyPct;
         }
+      }
+    }
+
+    // Apply total_bets from __NEXT_DATA__ JSON (reliable, no DOM/IO needed)
+    for (const [gameKey, game] of gameDataMap) {
+      if (numBetsMap[gameKey] != null) {
+        game.total_bets = numBetsMap[gameKey];
       }
     }
 
