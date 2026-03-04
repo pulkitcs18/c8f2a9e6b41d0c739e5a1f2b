@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import { buildNumBetsMap } from './extractors.js';
 
 const EMAIL = process.env.ACTION_NETWORK_EMAIL;
 const PASSWORD = process.env.ACTION_NETWORK_PASSWORD;
@@ -348,6 +349,29 @@ export async function scrapeActionNetwork(sport = 'nba') {
     }
 
     // ==================== NAVIGATE TO PUBLIC BETTING ====================
+    // Set up network interception BEFORE navigating so we capture any live
+    // API responses that Action Network fires post-hydration with updated num_bets.
+    // Falls back to __NEXT_DATA__ SSR snapshot if no live call is detected.
+    const liveNumBetsMap = {};
+    page.on('response', async (response) => {
+      const responseUrl = response.url();
+      const contentType = response.headers()['content-type'] || '';
+      if (!contentType.includes('application/json')) return;
+      if (!responseUrl.includes('actionnetwork.com')) return;
+      try {
+        const json = await response.json();
+        const games = json?.scoreboardResponse?.games
+          || json?.props?.pageProps?.scoreboardResponse?.games
+          || json?.games;
+        if (!Array.isArray(games)) return;
+        const live = buildNumBetsMap(games);
+        if (Object.keys(live).length > 0) {
+          console.log(`📡 Live num_bets captured from ${responseUrl} (${Object.keys(live).length / 2} games)`);
+          Object.assign(liveNumBetsMap, live);
+        }
+      } catch { /* response body may not be readable if already consumed */ }
+    });
+
     console.log('📊 Navigating to public betting page...');
     await page.goto(url, {
       waitUntil: 'networkidle2',
@@ -355,42 +379,25 @@ export async function scrapeActionNetwork(sport = 'nba') {
     });
     console.log('✅ Public betting page loaded');
 
-    // ==================== EXTRACT total_bets FROM __NEXT_DATA__ ====================
-    const numBetsMap = await page.evaluate(() => {
-      const games = window.__NEXT_DATA__?.props?.pageProps?.scoreboardResponse?.games || [];
-      const map = {};
-      for (const g of games) {
-        if (g.num_bets == null) continue;
-        // Collect all name variants per team (display_name + short_name)
-        const t0 = g.teams?.[0], t1 = g.teams?.[1];
-        if (!t0 || !t1) continue;
-        // JSON "Trail Blazers" → DOM uses "Blazers", etc.
-        const DOM_ALIASES = { 'Trail Blazers': 'Blazers' };
-        const addAliases = (names) => {
-          for (const n of [...names]) {
-            if (DOM_ALIASES[n]) names.push(DOM_ALIASES[n]);
-          }
-          return names;
-        };
-        const names0 = addAliases([...new Set([t0.display_name, t0.short_name].filter(Boolean))]);
-        const names1 = addAliases([...new Set([t1.display_name, t1.short_name].filter(Boolean))]);
-        // Store both orderings for every name combination
-        for (const n0 of names0) {
-          for (const n1 of names1) {
-            map[`${n0}_${n1}`] = g.num_bets;
-            map[`${n1}_${n0}`] = g.num_bets;
-          }
-        }
-      }
-      return map;
-    });
-    console.log(`📊 Extracted num_bets from __NEXT_DATA__ for ${Object.keys(numBetsMap).length} game key variants`);
+    // ==================== EXTRACT total_bets FROM __NEXT_DATA__ (SSR snapshot) ====================
+    const ssrGames = await page.evaluate(() =>
+      window.__NEXT_DATA__?.props?.pageProps?.scoreboardResponse?.games || []
+    );
+    const numBetsMap = buildNumBetsMap(ssrGames);
+    console.log(`📊 SSR num_bets: ${Object.keys(numBetsMap).length / 2} games`);
 
     // Choose the sport from dropdown as requested
     await selectLeague(page, sport);
 
-    // Wait for page to fully render after possible reload
+    // Wait for page to fully render after possible reload (also allows live API calls to fire)
     await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Merge num_bets: live API data (if captured) overwrites SSR snapshot
+    const liveGameCount = Object.keys(liveNumBetsMap).length / 2;
+    const effectiveNumBetsMap = liveGameCount > 0
+      ? { ...numBetsMap, ...liveNumBetsMap }
+      : numBetsMap;
+    console.log(`📊 num_bets source: ${liveGameCount > 0 ? `live API (${liveGameCount} games) merged with SSR` : 'SSR only'}`);
 
     // Verify we're on the right page with data
     const pageCheck = await page.evaluate(() => {
@@ -511,10 +518,10 @@ export async function scrapeActionNetwork(sport = 'nba') {
       }
     }
 
-    // Apply total_bets from __NEXT_DATA__ JSON (reliable, no DOM/IO needed)
+    // Apply total_bets: prefer live API data, fall back to SSR snapshot
     for (const [gameKey, game] of gameDataMap) {
-      if (numBetsMap[gameKey] != null) {
-        game.total_bets = numBetsMap[gameKey];
+      if (effectiveNumBetsMap[gameKey] != null) {
+        game.total_bets = effectiveNumBetsMap[gameKey];
       }
     }
 
