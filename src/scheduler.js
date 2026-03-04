@@ -9,19 +9,19 @@ const RETRY_DELAYS_MS = [30_000, 60_000, 120_000]; // 30s, 60s, 120s between ret
 
 export function startScheduler() {
   console.log('⏰ Starting multi-sport scheduler...');
-  console.log(`📅 Will scrape ${SPORTS.join(', ').toUpperCase()} every hour`);
-  console.log(`🕐 Next run: ${new Date(Date.now() + 60 * 60 * 1000).toLocaleTimeString()}\n`);
+  console.log(`📅 Will scrape ${SPORTS.join(', ').toUpperCase()} every 5 minutes`);
+  console.log(`🕐 Next run: ${new Date(Date.now() + 5 * 60 * 1000).toLocaleTimeString()}\n`);
 
-  // Run every hour
-  cron.schedule('0 * * * *', async () => {
+  // Run every 5 minutes
+  cron.schedule('*/5 * * * *', async () => {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`🚀 Scheduled multi-sport scrape starting at ${new Date().toLocaleString()}`);
     console.log('='.repeat(60));
 
     for (const sport of SPORTS) {
       await runScrapeJob(sport);
-      // Wait 30 seconds between sports to avoid rate limiting or overlap
-      await new Promise(resolve => setTimeout(resolve, 30000));
+      // Wait 10 seconds between sports to avoid rate limiting or overlap
+      await new Promise(resolve => setTimeout(resolve, 10000));
     }
   });
 
@@ -75,7 +75,7 @@ async function runScrapeJob(sport) {
       gamesIncomplete: incompleteGames.length,
       durationMs: Date.now() - startTime,
     });
-    console.log(`🕐 Next run: ${new Date(Date.now() + 60 * 60 * 1000).toLocaleTimeString()}\n`);
+    console.log(`🕐 Next run: ${new Date(Date.now() + 5 * 60 * 1000).toLocaleTimeString()}\n`);
 
   } catch (error) {
     updateJobStatus(job, 'failed', {
