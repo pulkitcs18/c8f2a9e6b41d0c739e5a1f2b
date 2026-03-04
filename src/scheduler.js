@@ -7,30 +7,39 @@ const SPORTS = process.env.SPORT
   : ['nba', 'nfl', 'nhl'];
 const RETRY_DELAYS_MS = [30_000, 60_000, 120_000]; // 30s, 60s, 120s between retries
 
+// Prevent overlapping scrape runs (Puppeteer OOM on concurrent Chrome instances)
+let isRunning = false;
+
+async function runAllSports(label = 'Scheduled') {
+  if (isRunning) {
+    console.log(`⏭️  ${label} scrape skipped — previous run still in progress`);
+    return;
+  }
+  isRunning = true;
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`🚀 ${label} multi-sport scrape starting at ${new Date().toLocaleString()}`);
+  console.log('='.repeat(60));
+  try {
+    for (const sport of SPORTS) {
+      await runScrapeJob(sport);
+      // Wait 10 seconds between sports to avoid rate limiting or overlap
+      await new Promise(resolve => setTimeout(resolve, 10000));
+    }
+  } finally {
+    isRunning = false;
+  }
+}
+
 export function startScheduler() {
   console.log('⏰ Starting multi-sport scheduler...');
   console.log(`📅 Will scrape ${SPORTS.join(', ').toUpperCase()} every 5 minutes`);
   console.log(`🕐 Next run: ${new Date(Date.now() + 5 * 60 * 1000).toLocaleTimeString()}\n`);
 
   // Run every 5 minutes
-  cron.schedule('*/5 * * * *', async () => {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🚀 Scheduled multi-sport scrape starting at ${new Date().toLocaleString()}`);
-    console.log('='.repeat(60));
-
-    for (const sport of SPORTS) {
-      await runScrapeJob(sport);
-      // Wait 10 seconds between sports to avoid rate limiting or overlap
-      await new Promise(resolve => setTimeout(resolve, 10000));
-    }
-  });
+  cron.schedule('*/5 * * * *', () => runAllSports('Scheduled'));
 
   console.log('▶️  Running initial full scrape...\n');
-  (async () => {
-    for (const sport of SPORTS) {
-      await runScrapeJob(sport);
-    }
-  })();
+  runAllSports('Initial');
 }
 
 async function retryWithBackoff(fn, label) {
