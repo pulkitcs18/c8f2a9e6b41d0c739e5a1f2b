@@ -19,7 +19,7 @@ if (!connected) {
 }
 
 console.log('');
-startScheduler();
+await startScheduler();
 
 process.on('SIGTERM', () => {
   console.log('\n👋 Received SIGTERM, shutting down gracefully...');

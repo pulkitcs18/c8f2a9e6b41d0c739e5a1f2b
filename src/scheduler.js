@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { scrapeActionNetwork } from './scraper.js';
+import { scrapeActionNetwork, launchBrowser } from './scraper.js';
 import { createScrapingJob, updateJobStatus, savePublicBettingData } from './database.js';
 
 const SPORTS = process.env.SPORT
@@ -7,7 +7,29 @@ const SPORTS = process.env.SPORT
   : ['nba', 'nfl', 'nhl'];
 const RETRY_DELAYS_MS = [30_000, 60_000, 120_000]; // 30s, 60s, 120s between retries
 
-// Prevent overlapping scrape runs (Puppeteer OOM on concurrent Chrome instances)
+// Single long-lived browser shared across all scrape runs to prevent Chrome OOM
+let sharedBrowser = null;
+
+async function ensureBrowser() {
+  if (sharedBrowser && sharedBrowser.isConnected()) return sharedBrowser;
+
+  // Close stale browser if disconnected
+  if (sharedBrowser) {
+    try { await sharedBrowser.close(); } catch {}
+    sharedBrowser = null;
+  }
+
+  sharedBrowser = await launchBrowser();
+
+  sharedBrowser.on('disconnected', () => {
+    console.log('⚠️  Browser disconnected — will relaunch on next scrape run');
+    sharedBrowser = null;
+  });
+
+  return sharedBrowser;
+}
+
+// Prevent overlapping scrape runs
 let isRunning = false;
 
 async function runAllSports(label = 'Scheduled') {
@@ -20,19 +42,25 @@ async function runAllSports(label = 'Scheduled') {
   console.log(`🚀 ${label} multi-sport scrape starting at ${new Date().toLocaleString()}`);
   console.log('='.repeat(60));
   try {
+    const browser = await ensureBrowser();
     for (const sport of SPORTS) {
-      await runScrapeJob(sport);
-      // Wait 10 seconds between sports to avoid rate limiting or overlap
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      await runScrapeJob(sport, browser);
+      if (SPORTS.length > 1) {
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
     }
   } finally {
     isRunning = false;
   }
 }
 
-export function startScheduler() {
+export async function startScheduler() {
   console.log('⏰ Starting multi-sport scheduler...');
   console.log(`📅 Will scrape ${SPORTS.join(', ').toUpperCase()} every 5 minutes`);
+
+  // Launch browser once at startup
+  await ensureBrowser();
+
   console.log(`🕐 Next run: ${new Date(Date.now() + 5 * 60 * 1000).toLocaleTimeString()}\n`);
 
   // Run every 5 minutes
@@ -62,13 +90,13 @@ async function retryWithBackoff(fn, label) {
   throw lastError;
 }
 
-async function runScrapeJob(sport) {
+async function runScrapeJob(sport, browser) {
   const startTime = Date.now();
   const job = createScrapingJob(sport);
 
   try {
     const games = await retryWithBackoff(
-      () => scrapeActionNetwork(sport),
+      () => scrapeActionNetwork(sport, browser),
       `${sport.toUpperCase()} scrape`
     );
 

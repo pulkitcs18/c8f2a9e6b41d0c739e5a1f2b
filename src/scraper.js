@@ -10,6 +10,37 @@ if (!EMAIL || !PASSWORD) {
   process.exit(1);
 }
 
+const BROWSER_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--disable-software-rasterizer',
+  '--disable-extensions',
+  '--no-zygote',                       // fewer child processes
+  '--single-process',                  // one Chrome process instead of many
+  '--disable-background-networking',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--disable-translate',
+  '--hide-scrollbars',
+  '--mute-audio',
+  '--no-first-run',
+  '--disk-cache-size=1',               // no disk cache accumulation
+  '--media-cache-size=1',
+];
+
+export async function launchBrowser() {
+  console.log('🌐 Launching browser...');
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: BROWSER_ARGS,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+  });
+  console.log('✅ Browser launched');
+  return browser;
+}
+
 // Helper function to select a league from the dropdown
 async function selectLeague(page, sport) {
   const sportUpper = sport.toUpperCase();
@@ -255,29 +286,25 @@ async function extractMarketData(page, marketType, sport = 'nba') {
   return data;
 }
 
-export async function scrapeActionNetwork(sport = 'nba') {
+// externalBrowser: pass a shared long-lived browser from the scheduler.
+// When provided, we open/close a page only — the browser stays alive.
+// When null (standalone test run), we launch and close our own browser.
+export async function scrapeActionNetwork(sport = 'nba', externalBrowser = null) {
   const url = `https://www.actionnetwork.com/${sport.toLowerCase()}/public-betting`;
   console.log(`\n🔍 Starting scrape: ${url}`);
 
+  const ownBrowser = !externalBrowser;
   let browser;
+  let page;
 
   try {
-    console.log('🌐 Launching browser...');
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-        '--disable-extensions',
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    });
-    console.log('✅ Browser launched');
+    if (ownBrowser) {
+      browser = await launchBrowser();
+    } else {
+      browser = externalBrowser;
+    }
 
-    const page = await browser.newPage();
+    page = await browser.newPage();
 
     await page.setViewport({ width: 1920, height: 5000 });
     await page.setUserAgent(
@@ -535,14 +562,20 @@ export async function scrapeActionNetwork(sport = 'nba') {
       console.log(JSON.stringify(games[0], null, 2));
     }
 
-    await browser.close();
-    console.log('✅ Browser closed');
+    await page.close();
+    if (ownBrowser) {
+      await browser.close();
+      console.log('✅ Browser closed');
+    } else {
+      console.log('✅ Page closed (shared browser kept alive)');
+    }
     return games;
 
   } catch (error) {
     console.error('❌ Scraping failed:', error.message);
     console.error('Stack trace:', error.stack);
-    if (browser) {
+    try { await page?.close(); } catch {}
+    if (ownBrowser && browser) {
       await browser.close();
       console.log('✅ Browser closed after error');
     }
