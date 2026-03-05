@@ -60,6 +60,12 @@ export async function savePublicBettingData(games) {
         ml_away_odds: game.ml_away_odds != null ? String(game.ml_away_odds) : null,
         ml_home_bets_pct: game.ml_home_bets_pct,
         ml_home_money_pct: game.ml_home_money_pct,
+        spread_open_away: game.spread_open_away,
+        spread_open_home: game.spread_open_home,
+        total_open_away: game.total_open_away,
+        total_open_home: game.total_open_home,
+        ml_open_away: game.ml_open_away,
+        ml_open_home: game.ml_open_home,
         scraped_at: now,
         updated_at: now,
       };

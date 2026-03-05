@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer';
-import { buildNumBetsMap } from './extractors.js';
+import { buildNumBetsMap, applyOpenLinesToGame } from './extractors.js';
 
 const EMAIL = process.env.ACTION_NETWORK_EMAIL;
 const PASSWORD = process.env.ACTION_NETWORK_PASSWORD;
@@ -262,6 +262,11 @@ async function extractMarketData(page, marketType, sport = 'nba') {
           if (i === 1) line2 = oddsText;
         });
 
+        // Extract opening line from the OPEN column
+        const openCells = row.querySelectorAll('.public-betting__open-cell');
+        const openAway = openCells[0]?.textContent?.trim() || null;
+        const openHome = openCells[1]?.textContent?.trim() || null;
+
         results.push({
           awayTeam,
           homeTeam,
@@ -272,6 +277,8 @@ async function extractMarketData(page, marketType, sport = 'nba') {
           homeBetsPct: percentages[1] || null,
           awayMoneyPct: percentages[2] || null,
           homeMoneyPct: percentages[3] || null,
+          openAway,
+          openHome,
         });
 
       } catch (err) {
@@ -473,6 +480,12 @@ export async function scrapeActionNetwork(sport = 'nba', externalBrowser = null)
           ml_home_bets_pct: null,
           ml_home_money_pct: null,
           total_bets: null,
+          spread_open_away: null,
+          spread_open_home: null,
+          total_open_away: null,
+          total_open_home: null,
+          ml_open_away: null,
+          ml_open_home: null,
         });
       }
 
@@ -485,6 +498,7 @@ export async function scrapeActionNetwork(sport = 'nba', externalBrowser = null)
       }
       game.spread_home_bets_pct = row.homeBetsPct;
       game.spread_home_money_pct = row.homeMoneyPct;
+      applyOpenLinesToGame(game, row.openAway, row.openHome, 'Spread');
     }
 
     // 2. Scrape TOTAL
@@ -509,6 +523,7 @@ export async function scrapeActionNetwork(sport = 'nba', externalBrowser = null)
           // Store over percentages only (new schema)
           game.over_bets_pct = row.awayBetsPct;
           game.over_money_pct = row.awayMoneyPct;
+          applyOpenLinesToGame(game, row.openAway, row.openHome, 'Total');
         }
       }
     }
@@ -541,6 +556,7 @@ export async function scrapeActionNetwork(sport = 'nba', externalBrowser = null)
           // Store home percentages for moneyline (new schema)
           game.ml_home_bets_pct = row.homeBetsPct;
           game.ml_home_money_pct = row.homeMoneyPct;
+          applyOpenLinesToGame(game, row.openAway, row.openHome, 'Moneyline');
         }
       }
     }

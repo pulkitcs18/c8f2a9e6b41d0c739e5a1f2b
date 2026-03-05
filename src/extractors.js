@@ -3,6 +3,42 @@
  * Extracted from scraper.js so the core data logic can be tested independently.
  */
 
+/**
+ * Parse a raw opening-line string from the DOM into a number.
+ * Handles spread ("+7.5"/"-7.5"), totals ("230.5"), and moneyline ("+295"/"-375").
+ * @param {string|null|undefined} text
+ * @returns {number|null}
+ */
+export function parseOpenLine(text) {
+  if (text == null || text === '') return null;
+  const val = parseFloat(text);
+  return isNaN(val) ? null : val;
+}
+
+/**
+ * Stamp the two opening-line values onto a game object for the given market type.
+ * Only writes the fields that belong to that market; leaves others untouched.
+ * @param {object} game       - game record from gameDataMap
+ * @param {string|null} openAway  - raw DOM text for away/over side
+ * @param {string|null} openHome  - raw DOM text for home/under side
+ * @param {string} marketType - 'Spread' | 'Total' | 'Moneyline'
+ */
+export function applyOpenLinesToGame(game, openAway, openHome, marketType) {
+  const away = parseOpenLine(openAway);
+  const home = parseOpenLine(openHome);
+  if (marketType === 'Spread') {
+    game.spread_open_away = away;
+    game.spread_open_home = home;
+  } else if (marketType === 'Total') {
+    game.total_open_away = away;
+    game.total_open_home = home;
+  } else if (marketType === 'Moneyline') {
+    game.ml_open_away = away;
+    game.ml_open_home = home;
+  }
+  // Unknown market type: no fields written, no throw.
+}
+
 // Maps JSON team names (from __NEXT_DATA__) to the short names Action Network
 // renders in the DOM, where they differ.
 export const DOM_ALIASES = {
