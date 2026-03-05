@@ -36,6 +36,14 @@ describe('parseOpenLine', () => {
   it('A8: returns null for undefined', () => {
     expect(parseOpenLine(undefined)).toBeNull();
   });
+
+  it('A9: parses over-prefixed total "o226.5" → 226.5', () => {
+    expect(parseOpenLine('o226.5')).toBe(226.5);
+  });
+
+  it('A10: parses under-prefixed total "u226.5" → 226.5', () => {
+    expect(parseOpenLine('u226.5')).toBe(226.5);
+  });
 });
 
 // ---------------------------------------------------------------------------

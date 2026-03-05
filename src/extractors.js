@@ -5,13 +5,16 @@
 
 /**
  * Parse a raw opening-line string from the DOM into a number.
- * Handles spread ("+7.5"/"-7.5"), totals ("230.5"), and moneyline ("+295"/"-375").
+ * Handles spread ("+7.5"/"-7.5"), totals ("230.5"/"o226.5"/"u226.5"),
+ * and moneyline ("+295"/"-375").
  * @param {string|null|undefined} text
  * @returns {number|null}
  */
 export function parseOpenLine(text) {
   if (text == null || text === '') return null;
-  const val = parseFloat(text);
+  // Strip over/under prefix used in Action Network Total view (e.g. "o226.5", "u226.5")
+  const stripped = text.replace(/^[ou]/i, '');
+  const val = parseFloat(stripped);
   return isNaN(val) ? null : val;
 }
 
